@@ -262,7 +262,8 @@ function game(id) {
     const color = seat === "black" ? 1 : 2;
     const turn = room.status === "playing" && room.turn === color;
     el.classList.toggle("turn", turn);
-    el.replaceChildren();
+    const floating = [...el.querySelectorAll(".plate-react")]; // keep reactions alive across re-renders
+    el.replaceChildren(...floating);
     const stone = document.createElement("span");
     stone.className = `stone ${s ? (color === 1 ? "b" : "w") : "none"}`;
     const name = document.createElement("span");
