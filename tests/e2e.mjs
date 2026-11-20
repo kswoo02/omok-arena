@@ -112,6 +112,7 @@ await B.getByRole("button", { name: "기권" }).tap();
 await B.getByRole("button", { name: "기권", exact: true }).last().tap();
 await A.waitForSelector(".stamp.show");
 check("PC sees black win seal", (await A.locator(".stamp").innerText()) === "흑승");
+await B.waitForFunction(() => document.querySelector(".status")?.innerText.includes("백 기권"), null, { timeout: 8000 }).catch(() => {});
 check("result text on phone", (await status(B)).includes("백 기권"));
 await A.getByRole("button", { name: "재대결 요청" }).click();
 await B.waitForSelector(".ask-rematch:not([hidden])");

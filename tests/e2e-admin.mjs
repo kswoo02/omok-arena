@@ -39,6 +39,7 @@ check("dashboard opens after login", true);
 const row = A.locator("#logs tr", { hasText: roomId }).filter({ hasText: "방 만들기" });
 check("room creation is logged with nickname and IP", (await row.count()) >= 1 && (await row.first().innerText()).includes("관리검사"));
 check("stats show today's IPs", Number(await A.locator("#stats dd").first().innerText()) >= 1);
+await A.locator("#rooms tr", { hasText: roomId }).waitFor({ timeout: 10000 }).catch(() => {});
 check("room listed in the rooms table", (await A.locator("#rooms tr", { hasText: roomId }).count()) === 1);
 
 // filter by clicking the room id
