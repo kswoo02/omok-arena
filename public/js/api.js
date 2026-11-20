@@ -53,12 +53,16 @@ const me = () => ({ playerId: playerId(), nickname: nickname() });
 
 export const api = {
   rooms: () => call("GET", "/api/rooms"),
-  create: (name, rule) => call("POST", "/api/rooms", { ...me(), name, rule }),
+  create: (name, rule, opts = {}) => call("POST", "/api/rooms", { ...me(), name, rule, ...opts }),
   room: (id) => call("GET", `/api/rooms/${id}?playerId=${encodeURIComponent(playerId())}`),
   join: (id) => call("POST", `/api/rooms/${id}/join`, me()),
   move: (id, idx) => call("POST", `/api/rooms/${id}/move`, { playerId: playerId(), idx }),
   resign: (id) => call("POST", `/api/rooms/${id}/resign`, { playerId: playerId() }),
   leave: (id) => call("POST", `/api/rooms/${id}/leave`, { playerId: playerId() }),
   rematch: (id) => call("POST", `/api/rooms/${id}/rematch`, { playerId: playerId() }),
+  decline: (id) => call("POST", `/api/rooms/${id}/decline`, { playerId: playerId() }),
+  kick: (id) => call("POST", `/api/rooms/${id}/kick`, { playerId: playerId() }),
+  react: (id, emoji) => call("POST", `/api/rooms/${id}/react`, { ...me(), emoji }),
+  ping: (id) => call("POST", `/api/rooms/${id}/ping`, me()),
   streamUrl: (id, v) => `/api/rooms/${id}/stream?playerId=${encodeURIComponent(playerId())}&v=${v}`,
 };

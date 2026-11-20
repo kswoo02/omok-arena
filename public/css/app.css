@@ -260,3 +260,54 @@ main { max-width: 1180px; margin: 0 auto; padding: 0 var(--gap) 48px; outline: n
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
+
+/* ---------- phase 2: clock, private, reactions, presence ---------- */
+.clock { border: 0; padding: 0; margin: 0 0 14px; }
+.clock legend { font-size: 14px; color: var(--ink-soft); margin-bottom: 6px; }
+.seg { display: flex; border-radius: 12px; background: #fff; border: 1.5px solid #ddd6c8; padding: 3px; gap: 3px; }
+.seg label { flex: 1; }
+.seg input { position: absolute; opacity: 0; }
+.seg span { display: block; text-align: center; padding: 8px 0; border-radius: 9px; cursor: pointer; font-size: 15px; }
+.seg input:checked + span { background: var(--slate); color: var(--shell); font-weight: 700; }
+.seg input:focus-visible + span { outline: 3px solid var(--cinnabar); outline-offset: 1px; }
+.check { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 18px; cursor: pointer; }
+.check input { width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--slate); flex: none; }
+.check small { display: block; color: var(--ink-soft); font-size: 13px; }
+.badge.clock-b { background: rgba(184, 50, 42, .12); color: var(--cinnabar); }
+
+.plate { position: relative; }
+.plate-clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; color: var(--slate); }
+.plate-clock.low { color: var(--cinnabar); }
+.plate-away { font-size: 12px; color: var(--ink-soft); border: 1px dashed var(--celadon-deep); border-radius: 999px; padding: 0 8px; }
+.plate-kick { border: 0; background: none; color: var(--cinnabar); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 13px; min-height: 32px; }
+.plate-react {
+  position: absolute; right: 14px; bottom: 70%; font-size: 30px; line-height: 1; pointer-events: none;
+  animation: float-up 2.2s ease-out forwards;
+}
+.plate-react small { display: block; font-size: 12px; text-align: center; color: var(--ink-soft); }
+@keyframes float-up {
+  0% { opacity: 0; transform: translateY(10px) scale(.6); }
+  15% { opacity: 1; transform: translateY(0) scale(1.15); }
+  30% { transform: scale(1); }
+  100% { opacity: 0; transform: translateY(-36px); }
+}
+
+.ask-rematch {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 12px; margin-bottom: 12px; border-radius: 14px; background: var(--shell);
+  border: 1.5px solid var(--cinnabar);
+}
+.ask-text { flex: 1 1 100%; font-weight: 700; }
+.emojis { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
+.emojis button {
+  width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer; font-size: 22px;
+  background: rgba(243, 239, 230, .7);
+}
+.emojis button:hover { background: var(--shell); }
+.emojis button:disabled { opacity: .4; cursor: default; }
+.watchers { margin: 12px 0 0; font-size: 14px; color: var(--ink-soft); }
+.react-float { /* spectator reactions float over the board */
+  position: absolute; left: 50%; top: 8%; transform: translateX(-50%); font-size: 34px; pointer-events: none;
+  animation: float-up 2.2s ease-out forwards; text-align: center;
+}
+.react-float small { display: block; font-size: 13px; color: var(--slate); background: var(--shell); border-radius: 8px; padding: 0 6px; }

@@ -119,6 +119,12 @@ function lobby() {
     badge.className = `badge ${r.rule}`;
     badge.textContent = r.rule === "renju" ? "렌주" : "자유";
     title.append(" ", badge);
+    if (r.timeLimit) {
+      const clock = document.createElement("span");
+      clock.className = "badge clock-b";
+      clock.textContent = `${r.timeLimit}초`;
+      title.append(" ", clock);
+    }
     const sub = document.createElement("span");
     sub.className = "room-sub";
     const who = r.names.join(", ");
@@ -142,7 +148,10 @@ function lobby() {
     const btn = form.querySelector("button[type=submit]");
     btn.disabled = true;
     try {
-      const { room } = await api.create(form.name.value, form.rule.value);
+      const { room } = await api.create(form.name.value, form.rule.value, {
+        timeLimit: Number(form.timeLimit.value),
+        private: form.private.checked,
+      });
       go(room.id);
     } catch (err) {
       toast(err.message);
@@ -173,8 +182,20 @@ function game(id) {
   let es = null;
   let alive = true;
   let stamped = null;
+  let clockOffset = 0; // server time - local time
+  let reactSeq = null;
+  const EMOJIS = ["👍", "😮", "😂", "😭", "🔥", "👏"];
 
   const board = createBoard(svg, { onPick: pick });
+  const emojiBar = $(".emojis");
+  for (const e of EMOJIS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = e;
+    b.setAttribute("aria-label", `${e} 보내기`);
+    b.addEventListener("click", () => sendReaction(e));
+    emojiBar.append(b);
+  }
 
   function myColor() {
     return room?.me === "black" ? 1 : room?.me === "white" ? 2 : 0;
@@ -186,9 +207,54 @@ function game(id) {
   function apply(next) {
     if (!next || (room && next.version < room.version)) return;
     const moved = room && next.moveCount !== room.moveCount;
+    const declined = room && room.rematch.mine && next.rematch.declined > room.rematch.declined;
+    clockOffset = next.serverNow - Date.now();
     room = next;
     if (moved || !myTurn()) selected = -1;
     render();
+    if (declined) toast("상대가 재대결을 거절했어요.");
+    const r = room.reaction;
+    if (r && reactSeq !== null && r.seq > reactSeq) showReaction(r);
+    if (r) reactSeq = Math.max(reactSeq ?? 0, r.seq);
+    else if (reactSeq === null) reactSeq = 0;
+  }
+
+  function showReaction(r) {
+    const bottomSeat = room.me ?? "black";
+    const host = !r.seat ? $(".board-wrap") : r.seat === bottomSeat ? plates.bottom : plates.top;
+    const el = document.createElement("span");
+    el.className = r.seat ? "plate-react" : "react-float";
+    el.textContent = r.emoji;
+    if (!r.seat) {
+      const who = document.createElement("small");
+      who.textContent = r.name;
+      el.append(who);
+    }
+    host.append(el);
+    setTimeout(() => el.remove(), 2300);
+  }
+
+  async function sendReaction(e) {
+    const buttons = [...emojiBar.children];
+    buttons.forEach((b) => (b.disabled = true));
+    setTimeout(() => buttons.forEach((b) => (b.disabled = false)), 2000);
+    try {
+      apply((await api.react(id, e)).room);
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  function clockText(deadline) {
+    const left = Math.max(0, Math.ceil((deadline - (Date.now() + clockOffset)) / 1000));
+    return { text: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`, low: left <= 10 };
+  }
+  function tickClock() {
+    const el = document.querySelector(".plate-clock");
+    if (!el || !room?.deadline) return;
+    const c = clockText(room.deadline);
+    el.textContent = c.text;
+    el.classList.toggle("low", c.low);
   }
 
   function plate(el, seat) {
@@ -206,11 +272,33 @@ function game(id) {
     small.textContent = `${color === 1 ? "흑" : "백"}${room.me === seat ? ", 나" : ""}`;
     name.append(small);
     el.append(stone, name);
+    if (s && s.online === false) {
+      const away = document.createElement("span");
+      away.className = "plate-away";
+      away.textContent = "자리 비움";
+      el.append(away);
+    }
+    if (s && room.owner && room.me && room.me !== seat && (room.status !== "playing" || s.online === false)) {
+      const k = document.createElement("button");
+      k.type = "button";
+      k.className = "plate-kick";
+      k.dataset.act = "kick";
+      k.textContent = "내보내기";
+      el.append(k);
+    }
     if (turn) {
       const tag = document.createElement("span");
       tag.className = "plate-tag";
       tag.textContent = room.me === seat ? "내 차례" : "두는 중";
       el.append(tag);
+      if (room.deadline) {
+        const c = clockText(room.deadline);
+        const clock = document.createElement("span");
+        clock.className = `plate-clock${c.low ? " low" : ""}`;
+        clock.textContent = c.text;
+        clock.setAttribute("aria-label", "남은 시간");
+        el.append(clock);
+      }
     }
     if (room.status === "ended" && room.result?.winner === color) {
       const seal = document.createElement("span");
@@ -248,6 +336,14 @@ function game(id) {
     const badge = $(".rule-badge");
     badge.textContent = room.rule === "renju" ? "렌주룰" : "자유룰";
     badge.className = `badge rule-badge ${room.rule}`;
+    $(".room-meta").querySelectorAll(".meta-extra").forEach((n) => n.remove());
+    for (const [on, text, cls] of [[room.timeLimit, `한 수 ${room.timeLimit}초`, "clock-b"], [room.private, "비공개", ""]]) {
+      if (!on) continue;
+      const b = document.createElement("span");
+      b.className = `badge meta-extra ${cls}`;
+      b.textContent = text;
+      $(".room-meta").append(b);
+    }
     // my plate at the bottom (black when spectating)
     const mine = room.me ?? "black";
     plate(plates.bottom, mine);
@@ -270,15 +366,20 @@ function game(id) {
     if (selected >= 0) $(".confirm-pos").textContent = `${label(selected)}에 둘까요?`;
 
     const seated = !!room.me;
+    const opponent = room.me ? room.seats[room.me === "black" ? "white" : "black"] : null;
+    const asked = seated && room.status === "ended" && room.rematch.fromOther;
+    $(".ask-rematch").hidden = !asked;
+    if (asked) $(".ask-text").textContent = `${opponent?.name ?? "상대"}님이 재대결을 원해요. 흑백을 바꿔 새 판을 시작해요.`;
+    const watchers = $(".watchers");
+    watchers.hidden = !room.spectators?.length;
+    watchers.textContent = room.spectators?.length ? `관전 ${room.spectators.length}명: ${room.spectators.join(", ")}` : "";
     const rematch = $("[data-act=rematch]");
-    rematch.hidden = !(seated && room.status === "ended");
+    rematch.hidden = !(seated && room.status === "ended") || asked;
     rematch.disabled = room.rematch.mine;
-    rematch.textContent = room.rematch.mine
-      ? "상대의 응답을 기다리는 중"
-      : room.rematch.count ? "다시 두기 (상대가 원해요)" : "다시 두기";
+    rematch.textContent = room.rematch.mine ? "재대결 요청함, 응답을 기다리는 중" : "재대결 요청";
     $("[data-act=resign]").hidden = !(seated && room.status === "playing");
 
-    const key = room.status === "ended" && room.result?.winner ? `${room.version}` : null;
+    const key = room.status === "ended" && room.result?.winner ? `${room.moveCount}|${room.result.reason}` : null;
     if (key && key !== stamped) {
       stamped = key;
       stamp.textContent = room.result.winner === 1 ? "흑승" : "백승";
@@ -350,7 +451,13 @@ function game(id) {
         if (!(await ask("기권할까요? 상대의 승리로 끝나요.", "기권"))) return;
         return apply((await api.resign(id)).room);
       }
-      if (name === "rematch") return apply((await api.rematch(id)).room);
+      if (name === "rematch" || name === "accept") return apply((await api.rematch(id)).room);
+      if (name === "decline") return apply((await api.decline(id)).room);
+      if (name === "kick") {
+        const opp = room.seats[room.me === "black" ? "white" : "black"];
+        if (!(await ask(`${opp?.name ?? "상대"}님을 내보낼까요? 이 방에서는 관전만 할 수 있게 돼요.`, "내보내기"))) return;
+        return apply((await api.kick(id)).room);
+      }
       if (name === "leave") {
         if (room?.me && room.status === "playing" && !(await ask("대국 중이에요. 기권하고 나갈까요?", "기권하고 나가기"))) return;
         if (room?.me) await api.leave(id);
@@ -369,6 +476,19 @@ function game(id) {
     if (!alive || es || document.visibilityState !== "visible") return;
     es = new EventSource(api.streamUrl(id, room?.version ?? -1));
     es.addEventListener("room", (e) => apply(JSON.parse(e.data)));
+    es.addEventListener("presence", (e) => {
+      if (!room) return;
+      const p = JSON.parse(e.data);
+      room = {
+        ...room,
+        spectators: p.spectators,
+        seats: {
+          black: room.seats.black && { ...room.seats.black, online: p.online.black },
+          white: room.seats.white && { ...room.seats.white, online: p.online.white },
+        },
+      };
+      render();
+    });
     es.addEventListener("gone", () => {
       disconnect();
       statusEl.textContent = "방이 사라졌어요. 로비에서 새 방을 만들어 주세요.";
@@ -387,6 +507,9 @@ function game(id) {
     } else disconnect();
   }
   document.addEventListener("visibilitychange", onVisible);
+  const clockTimer = setInterval(tickClock, 250);
+  const ping = () => document.visibilityState === "visible" && api.ping(id).catch(() => {});
+  const pingTimer = setInterval(ping, 20_000);
 
   (async () => {
     try {
@@ -407,6 +530,8 @@ function game(id) {
   return () => {
     alive = false;
     disconnect();
+    clearInterval(clockTimer);
+    clearInterval(pingTimer);
     document.removeEventListener("visibilitychange", onVisible);
   };
 }

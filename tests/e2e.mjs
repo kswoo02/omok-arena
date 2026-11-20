@@ -112,19 +112,41 @@ await B.getByRole("button", { name: "기권", exact: true }).last().tap();
 await A.waitForSelector(".stamp.show");
 check("PC sees black win seal", (await A.locator(".stamp").innerText()) === "흑승");
 check("result text on phone", (await status(B)).includes("백 기권"));
-await A.getByRole("button", { name: "다시 두기" }).click();
-await B.getByRole("button", { name: /다시 두기/ }).tap();
+await A.getByRole("button", { name: "재대결 요청" }).click();
+await B.waitForSelector(".ask-rematch:not([hidden])");
+check("phone is asked for a rematch", (await B.locator(".ask-text").innerText()).includes("앨리스님이 재대결을 원해요"));
+await B.getByRole("button", { name: "수락" }).tap();
 await A.waitForFunction(() => document.querySelector(".plate-bottom")?.innerText.includes("백"));
 check("rematch swaps colors (PC now white)", true);
 
-// ---- free rule: a real five wins
+// ---- emoji from the phone floats on the PC; a spectator is listed
+await B.getByRole("button", { name: "🔥 보내기" }).tap();
+await A.waitForSelector(".plate-react", { timeout: 8000 });
+check("emoji reaction reaches the PC", (await A.locator(".plate-react").first().innerText()).includes("🔥"));
+const C = await open("관전", { viewport: { width: 1000, height: 760 } });
+await C.goto(A.url());
+await enterName(C, "찰리");
+await C.waitForSelector(".plate-bottom >> text=밥"); // spectator sees black (밥) at the bottom
+check("third visitor spectates", (await status(C)).includes("관전 중"));
+await A.waitForFunction(() => document.querySelector(".watchers")?.innerText.includes("찰리"), null, { timeout: 15000 });
+check("PC sees the spectator listed", true);
+await C.close();
+
+// ---- free rule: a real five wins (private room with a 60 s clock)
 await A.goto(BASE);
 await A.locator("label.rule", { hasText: "자유룰" }).click();
+await A.locator(".seg label", { hasText: "60초" }).click();
+await A.locator("label.check").click();
 await A.getByRole("button", { name: "방 만들기" }).click();
 await A.waitForURL(/\?room=/);
 await B.goto(A.url());
 await B.waitForSelector(".plate-bottom >> text=밥");
 await A.waitForSelector(".plate-top >> text=밥");
+await A.waitForSelector(".plate-clock");
+const clock1 = await A.locator(".plate-clock").innerText();
+check(`move clock counts down (${clock1})`, /^[01]:\d\d$/.test(clock1) && clock1 !== "0:00");
+const listed = await A.evaluate(async (u) => (await (await fetch("/api/rooms")).json()).rooms.some((r) => u.includes(r.id)), A.url());
+check("private room hidden from the lobby list", listed === false);
 for (let i = 0; i < 5; i++) {
   await hit(A, at(i, 0));
   await waitStones(B, i * 2 + 1);
@@ -140,6 +162,12 @@ if (OUT) {
   await A.screenshot({ path: `${OUT}/pc-win.png` });
   await B.screenshot({ path: `${OUT}/phone-win.png` });
 }
+
+// ---- owner kicks the opponent after the game; the kicked player can only watch
+await A.locator(".plate-top .plate-kick").click();
+await A.getByRole("button", { name: "내보내기", exact: true }).last().click();
+await B.waitForFunction(() => document.querySelector(".status")?.innerText.includes("관전") || document.querySelector(".plate-bottom")?.innerText.includes("앨리스"), null, { timeout: 10000 });
+check("kicked player loses the seat", (await A.locator(".plate-top").innerText()).includes("빈자리"));
 
 // ---- lobby lists rooms
 await A.goto(BASE);

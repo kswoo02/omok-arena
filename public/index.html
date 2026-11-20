@@ -66,6 +66,18 @@
             </span>
           </label>
         </fieldset>
+        <fieldset class="clock">
+          <legend>한 수 시간제한</legend>
+          <div class="seg">
+            <label><input type="radio" name="timeLimit" value="0" checked /><span>없음</span></label>
+            <label><input type="radio" name="timeLimit" value="30" /><span>30초</span></label>
+            <label><input type="radio" name="timeLimit" value="60" /><span>60초</span></label>
+          </div>
+        </fieldset>
+        <label class="check">
+          <input type="checkbox" name="private" />
+          <span>비공개 방 <small>목록에 안 보이고 초대 링크로만 들어와요</small></span>
+        </label>
         <button class="btn btn-ink btn-wide" type="submit">방 만들기</button>
       </form>
 
@@ -95,6 +107,11 @@
           <span class="badge rule-badge"></span>
         </div>
         <p class="status" aria-live="polite"></p>
+        <div class="ask-rematch" hidden>
+          <span class="ask-text"></span>
+          <button class="btn btn-ink" type="button" data-act="accept">수락</button>
+          <button class="btn btn-line" type="button" data-act="decline">거절</button>
+        </div>
         <div class="confirm" hidden>
           <span class="confirm-pos"></span>
           <button class="btn btn-ink" type="button" data-act="place">여기에 두기</button>
@@ -106,6 +123,8 @@
           <button class="btn btn-line" type="button" data-act="resign" hidden>기권</button>
           <button class="btn-text" type="button" data-act="leave">나가기</button>
         </div>
+        <div class="emojis" role="group" aria-label="이모티콘 보내기"></div>
+        <p class="watchers" hidden></p>
       </aside>
     </section>
   </template>
