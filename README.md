@@ -21,9 +21,17 @@ vercel integration add upstash/upstash-kv --name omok-redis   # 처음 한 번, 
 vercel deploy --prod
 ```
 
-공개 주소: (배포 후 기록)
+**공개 주소: https://omok-arena-dun.vercel.app** (가입 없이 접속, HTTPS)
+
+초대 링크 형식: `https://omok-arena-dun.vercel.app/?room=<방 ID>`
 
 ## 진행 상태
 
-- 완료: 렌주 판정, 방·좌석·재접속, API·SSE, 반응형 화면, 로컬 테스트 33개 + 두 브라우저 e2e 20개 통과
-- 남음: Upstash 연결, Vercel 배포, 공개 주소로 외부망 두 기기 확인
+- 완료: 렌주 판정, 방·좌석·재접속, API·SSE, 반응형 화면, Upstash Redis 연결, Vercel 배포
+- 검증 (2026-11-20)
+  - 로컬: 단위·통합 테스트 33개 통과
+  - 공개 주소: PC + 휴대폰(iPhone 13 에뮬레이션) 두 브라우저 e2e 20개 통과
+    (방 생성, 링크 입장, 착수 동기화, 첫 수 중앙, 3·3 금수 이유 표시, 새로고침 복귀, 기권, 다시 두기, 자유룰 5목 승리, 로비 목록)
+  - 실제 Upstash Redis에서 중복 방 생성·동시 착수가 한 번만 반영되는지 확인
+- 남은 확인: 실제 휴대폰을 LTE 등 다른 네트워크에 두고 PC와 같은 방에서 한 판 두기
+  (위 e2e는 이 PC에서 공개 주소로 접속한 것이라, 서로 다른 실제 네트워크 조합은 아직 안 해 봄)
