@@ -16,8 +16,8 @@ async function open(name, opts) {
   const ctx = await browser.newContext(opts);
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`[${name}] ${e.message}`));
-  // 403 responses are expected while a secret room asks for its password
-  page.on("console", (m) => m.type() === "error" && !m.text().includes("status of 403") && errors.push(`[${name}] ${m.text()}`));
+  // expected: 403 while a secret room asks for its password, 404 when opening a room that was closed
+  page.on("console", (m) => m.type() === "error" && !/status of 40[34]/.test(m.text()) && errors.push(`[${name}] ${m.text()}`));
   return page;
 }
 async function enterName(page, name) {
@@ -181,6 +181,49 @@ await A.locator(".plate-top .plate-kick").click();
 await A.getByRole("button", { name: "내보내기", exact: true }).last().click();
 await B.waitForFunction(() => document.querySelector(".status")?.innerText.includes("관전") || document.querySelector(".plate-bottom")?.innerText.includes("앨리스"), null, { timeout: 10000 });
 check("kicked player loses the seat", (await A.locator(".plate-top").innerText()).includes("빈자리"));
+
+// ---- leaving: corner button / logo give the seat up; an empty room disappears
+await A.goto(BASE);
+await A.getByRole("button", { name: "방 만들기" }).click();
+await A.waitForURL(/\?room=/);
+const gone1 = A.url();
+await A.waitForSelector(".plate-bottom >> text=앨리스");
+check("leave button sits in the top corner", (await A.locator("#exit").boundingBox()).y < 60);
+await A.locator("#exit").click();
+await A.waitForSelector(".lobby");
+await A.waitForTimeout(500);
+const ids1 = await A.evaluate(async () => (await (await fetch("/api/rooms")).json()).rooms.map((r) => r.id));
+check("room I left is not listed", !ids1.some((x) => gone1.includes(x)));
+await B.goto(gone1);
+await B.waitForSelector("text=방에 들어갈 수 없어요");
+check("link to the room I left no longer works", true);
+await A.getByRole("button", { name: "방 만들기" }).click();
+await A.waitForURL(/\?room=/);
+const gone2 = A.url();
+await A.waitForSelector(".plate-bottom >> text=앨리스");
+await A.locator(".brand").click();
+await A.waitForSelector(".lobby");
+await A.waitForTimeout(500);
+const ids2 = await A.evaluate(async () => (await (await fetch("/api/rooms")).json()).rooms.map((r) => r.id));
+check("leaving by the logo also closes my empty room", !ids2.some((x) => gone2.includes(x)));
+
+// ---- back button mid-game asks first; cancelling keeps the seat
+await A.getByRole("button", { name: "방 만들기" }).click();
+await A.waitForURL(/\?room=/);
+const stay = A.url();
+await B.goto(stay);
+await B.waitForSelector(".plate-bottom >> text=밥");
+await A.waitForSelector(".plate-top >> text=밥");
+await A.goBack();
+await A.waitForSelector("#confirm-dialog[open]");
+await A.getByRole("button", { name: "취소" }).click();
+await A.waitForTimeout(500);
+check("cancelled back keeps me in the room", A.url() === stay && (await A.locator(".plate-bottom").innerText()).includes("앨리스"));
+await A.locator("#exit").click();
+await A.getByRole("button", { name: "기권하고 나가기" }).click();
+await A.waitForSelector(".lobby");
+await B.waitForFunction(() => document.querySelector(".status")?.innerText.includes("흑 기권"), null, { timeout: 10000 });
+check("leaving mid-game resigns for the opponent to see", true);
 
 // ---- lobby lists rooms
 await A.goto(BASE);

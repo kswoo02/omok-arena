@@ -1,6 +1,6 @@
 // HTTP routing shared by the Vercel function (api/index.js) and dev-server.js.
 import { randomBytes } from "node:crypto";
-import { canSee, cleanName, declineRematch, join, kick, leave, move, newRoom, react, rematch, resign, settle, view } from "./game.js";
+import { abandoned, canSee, cleanName, declineRematch, join, kick, leave, move, newRoom, react, rematch, resign, seatOf, settle, view } from "./game.js";
 
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const ROOM_RE = /^[a-z0-9]{6,12}$/;
@@ -65,6 +65,7 @@ export async function route({ method, path, query = {}, body = {} }, store) {
         };
         if (await store.put(room, 0)) {
           await store.touch(room.id, playerId, { name: player.name, at: Date.now() });
+          await store.markLive(room.id, Date.now());
           return res(201, { room: view(room, playerId), seat: "black" });
         }
       }
@@ -98,9 +99,15 @@ export async function route({ method, path, query = {}, body = {} }, store) {
       if (!player) return bad("nickname", "닉네임을 입력해 주세요");
       if (!(await store.get(id))) return bad("not_found", "방이 없어요. 시간이 지나 사라졌을 수 있어요.", 404);
       const password = typeof body.password === "string" ? body.password : undefined;
-      const out = await mutate(store, id, playerId, (r, _s, now) => join(r, player, now, { password }));
+      const out = await mutate(store, id, playerId, (r, seen, now) =>
+        !seatOf(r, playerId) && abandoned(r, seen, now)
+          ? { error: { status: 410, code: "closed", reason: "방장이 오래 자리를 비워 닫힌 방이에요. 로비에서 다른 방을 찾아 주세요." } }
+          : join(r, player, now, { password }));
       // only people who got in count as present (a wrong password must not appear as a spectator)
-      if (out.status === 200) await store.touch(id, playerId, { name: player.name, at: Date.now() });
+      if (out.status === 200) {
+        await store.touch(id, playerId, { name: player.name, at: Date.now() });
+        if (out.json.seat) await store.markLive(id, Date.now());
+      }
       return out;
     }
     case "move": {
@@ -109,7 +116,10 @@ export async function route({ method, path, query = {}, body = {} }, store) {
     }
     case "ping": {
       const name = cleanName(body.nickname) || "손님";
+      const room = await store.get(id);
+      if (!room) return bad("not_found", "방이 없어요", 404);
       await store.touch(id, playerId, { name, at: Date.now() });
+      if (seatOf(room, playerId)) await store.markLive(id, Date.now());
       return res(200, { ok: true });
     }
     case "react": {
@@ -122,8 +132,12 @@ export async function route({ method, path, query = {}, body = {} }, store) {
       return mutate(store, id, playerId, (r, seen, now) => kick(r, playerId, seen, now));
     case "resign":
       return mutate(store, id, playerId, (r) => resign(r, playerId));
-    case "leave":
-      return mutate(store, id, playerId, (r) => leave(r, playerId));
+    case "leave": {
+      const out = await mutate(store, id, playerId, (r) => leave(r, playerId));
+      const room = out.status === 200 ? await store.get(id) : null;
+      if (room && !room.seats.black && !room.seats.white) await store.remove(id); // last one out closes the room
+      return out;
+    }
     case "rematch":
       return mutate(store, id, playerId, (r, _s, now) => rematch(r, playerId, now));
     default:

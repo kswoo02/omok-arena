@@ -59,12 +59,25 @@ function savedPw(id) {
 
 // ---------------- routing ----------------
 let cleanup = () => {};
-function go(roomId) {
+/** set by the game screen: resolves true when it is fine to leave (seat given up), false to stay */
+let beforeLeave = null;
+let roomUrl = null;
+
+async function go(roomId) {
+  if (beforeLeave && !(await beforeLeave())) return;
   const url = roomId ? `/?room=${roomId}` : "/";
   history.pushState(null, "", url);
   route();
 }
-window.addEventListener("popstate", route);
+window.addEventListener("popstate", async () => {
+  if (beforeLeave && roomUrl && location.search !== roomUrl) {
+    if (!(await beforeLeave())) {
+      history.pushState(null, "", roomUrl); // stay in the room
+      return;
+    }
+  }
+  route();
+});
 document.addEventListener("click", (e) => {
   const a = e.target.closest("[data-nav=lobby]");
   if (a) {
@@ -72,15 +85,23 @@ document.addEventListener("click", (e) => {
     go(null);
   }
 });
+$("#exit").addEventListener("click", () => go(null));
 
 function route() {
   cleanup();
   cleanup = () => {};
+  beforeLeave = null;
+  roomUrl = null;
   updateWho();
+  $("#exit").hidden = true;
   const roomId = new URLSearchParams(location.search).get("room");
   if (!nickname()) return nameGate(roomId);
-  if (roomId) cleanup = game(roomId.toLowerCase());
-  else cleanup = lobby();
+  if (roomId) {
+    $("#who").hidden = true; // in a room the corner holds the leave button instead
+    $("#exit").hidden = false;
+    roomUrl = location.search;
+    cleanup = game(roomId.toLowerCase());
+  } else cleanup = lobby();
 }
 
 function nameGate(roomId) {
@@ -350,7 +371,8 @@ function game(id, initial = null) {
       if (!r) return "대국이 끝났어요.";
       const mine = r.winner && r.winner === myColor();
       const tail = room.me ? (mine ? " 이겼어요!" : r.winner ? " 아쉽게 졌어요." : "") : "";
-      return `${r.reason}.${tail}`;
+      const opp = room.me && !room.seats[room.me === "black" ? "white" : "black"];
+      return `${r.reason}.${tail}${opp ? " 상대가 방을 나갔어요. 새 상대가 들어오면 바로 시작해요." : ""}`;
     }
     if (!room.me) return `관전 중이에요. ${turnName} 차례예요.`;
     if (myTurn()) {
@@ -406,7 +428,7 @@ function game(id, initial = null) {
     watchers.hidden = !room.spectators?.length;
     watchers.textContent = room.spectators?.length ? `관전 ${room.spectators.length}명: ${room.spectators.join(", ")}` : "";
     const rematch = $("[data-act=rematch]");
-    rematch.hidden = !(seated && room.status === "ended") || asked;
+    rematch.hidden = !(seated && room.status === "ended" && opponent) || asked;
     rematch.disabled = room.rematch.mine;
     rematch.textContent = room.rematch.mine ? "재대결 요청함, 응답을 기다리는 중" : "재대결 요청";
     $("[data-act=resign]").hidden = !(seated && room.status === "playing");
@@ -490,15 +512,21 @@ function game(id, initial = null) {
         if (!(await ask(`${opp?.name ?? "상대"}님을 내보낼까요? 이 방에서는 관전만 할 수 있게 돼요.`, "내보내기"))) return;
         return apply((await api.kick(id)).room);
       }
-      if (name === "leave") {
-        if (room?.me && room.status === "playing" && !(await ask("대국 중이에요. 기권하고 나갈까요?", "기권하고 나가기"))) return;
-        if (room?.me) await api.leave(id);
-        return go(null);
-      }
+      if (name === "leave") return go(null);
     } catch (e) {
       toast(e.message);
     }
   }
+  // every way out (corner button, logo, browser back) gives the seat up; mid-game it is a resign
+  beforeLeave = async () => {
+    if (room?.me) {
+      if (room.status === "playing" && !(await ask("대국 중이에요. 기권하고 나갈까요?", "기권하고 나가기"))) return false;
+      try {
+        await api.leave(id);
+      } catch {}
+    }
+    return true;
+  };
   $(".game").addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]");
     if (b) act(b.dataset.act);

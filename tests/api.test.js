@@ -203,3 +203,25 @@ test("spectator shows up in presence; reactions and rematch decline reach the ot
   const back = await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "밥" });
   assert.equal(back.json.seat, null);
 });
+
+test("last player leaving deletes the room: not listed, link no longer works", async () => {
+  const id = (await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free" })).json.room.id;
+  assert.ok((await call("GET", "/api/rooms")).json.rooms.some((r) => r.id === id));
+  const l = await call("POST", `/api/rooms/${id}/leave`, { playerId: PA });
+  assert.equal(l.status, 200);
+  assert.equal((await call("GET", "/api/rooms")).json.rooms.some((r) => r.id === id), false);
+  assert.equal((await call("GET", `/api/rooms/${id}?playerId=${PB}`)).status, 404);
+  assert.equal((await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B" })).status, 404);
+});
+
+test("one of two leaving keeps the room for the other", async () => {
+  const id = (await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free" })).json.room.id;
+  await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B" });
+  await call("POST", `/api/rooms/${id}/leave`, { playerId: PB });
+  const r = await call("GET", `/api/rooms/${id}?playerId=${PA}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.room.status, "ended"); // B left mid-game = resign; A still sees the result
+  assert.equal(r.json.room.result.reason, "백 기권");
+  const listed = (await call("GET", "/api/rooms")).json.rooms.find((x) => x.id === id);
+  assert.equal(listed.status, "waiting"); // lobby shows it as joinable
+});

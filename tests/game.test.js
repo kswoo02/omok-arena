@@ -96,7 +96,7 @@ test("resign and leave", () => {
   assert.equal(room.result.reason, "흑 기권");
   room = ok(leave(room, "pb"));
   assert.equal(room.seats.white, null);
-  assert.equal(room.status, "waiting");
+  assert.equal(room.status, "ended"); // the result stays visible to the one who stayed
   room = join(room, C).room;
   assert.equal(room.seats.white.id, "pc");
   assert.equal(room.status, "playing");
@@ -145,6 +145,7 @@ test("memory store compare-and-set allows only one writer per version", async ()
   assert.deepEqual([a, b], [true, false]);
   assert.equal(await s.version("r9"), 2);
   assert.equal(await s.get("nope"), null);
+  await s.markLive("r9", Date.now());
   const list = await s.list();
   assert.equal(list[0].id, "r9");
   assert.equal(list[0].players, 1);

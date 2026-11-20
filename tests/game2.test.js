@@ -83,7 +83,7 @@ test("owner can kick an idle opponent; kicked player only spectates afterwards",
   assert.equal(kick(room, "pb", {}, T0).error.code, "owner");
   room = ok(kick(room, "pa", { pb: { at: T0 } }, T0 + 60_000));
   assert.equal(room.seats.white, null);
-  assert.equal(room.status, "waiting");
+  assert.equal(room.status, "ended");
   assert.equal(room.result.reason, "백 기권");
   const back = join(room, B, T0 + 61_000);
   assert.equal(back.seat, null);
@@ -107,6 +107,7 @@ test("secret room: listed with a lock, password needed to enter, never exposed",
   const s = memoryStore();
   const sec = { ...newRoom({ id: "sec1", name: "", rule: "free", player: A, password: "1234" }), version: 1 };
   await s.put(sec, 0);
+  await s.markLive("sec1", Date.now());
   const listed = (await s.list()).find((r) => r.id === "sec1");
   assert.equal(listed.locked, true);
   assert.equal(JSON.stringify(listed).includes("1234"), false);
@@ -157,4 +158,28 @@ test("view lists spectators and online state from presence", () => {
   assert.equal(v.seats.black.online, true);
   assert.equal(v.seats.white.online, false);
   assert.equal(typeof v.serverNow, "number");
+});
+
+test("abandoned: waiting room whose seated players are gone too long", async () => {
+  const { abandoned } = await import("../server/game.js");
+  const room = newRoom({ id: "ab1", name: "", rule: "free", player: A, now: T0 });
+  assert.equal(abandoned(room, { pa: { at: T0 } }, T0 + 60_000), false);
+  assert.equal(abandoned(room, { pa: { at: T0 } }, T0 + 11 * 60_000), true);
+  assert.equal(abandoned(room, {}, T0 + 11 * 60_000), true);
+  const busy = join(room, B, T0).room; // playing rooms are never "abandoned" for joins
+  assert.equal(abandoned(busy, {}, T0 + 60 * 60_000), false);
+});
+
+test("store lists only rooms with a seated player online recently", async () => {
+  const s = memoryStore();
+  const r1 = { ...newRoom({ id: "live1", name: "", rule: "free", player: A }), version: 1 };
+  const r2 = { ...newRoom({ id: "dead1", name: "", rule: "free", player: B }), version: 1 };
+  await s.put(r1, 0);
+  await s.put(r2, 0);
+  await s.markLive("live1", Date.now());
+  await s.markLive("dead1", Date.now() - 5 * 60_000);
+  assert.deepEqual((await s.list()).map((r) => r.id), ["live1"]);
+  await s.remove("live1");
+  assert.equal(await s.get("live1"), null);
+  assert.deepEqual(await s.list(), []);
 });

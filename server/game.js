@@ -7,6 +7,7 @@ const SEAT_OF = { 1: "black", 2: "white" };
 export const EMOJIS = ["👍", "😮", "😂", "😭", "🔥", "👏"];
 export const TIME_LIMITS = [0, 30, 60];
 export const ONLINE_MS = 45_000; // seen within this window = online
+export const CLOSED_MS = 10 * 60_000; // waiting room left alone this long refuses new players
 const REACT_GAP_MS = 2_000;
 
 export function cleanName(s, max = 12) {
@@ -97,6 +98,13 @@ export function join(room, player, now = Date.now(), { password } = {}) {
   return { room: next, seat };
 }
 
+/** a waiting room whose seated players have all been gone for CLOSED_MS (tab closed, never came back) */
+export function abandoned(room, seen = {}, now = Date.now()) {
+  if (room.status !== "waiting") return false;
+  const ids = [room.seats.black?.id, room.seats.white?.id].filter(Boolean);
+  return ids.every((id) => now - (seen[id]?.at ?? 0) > CLOSED_MS);
+}
+
 /** time ran out on the current turn: the player to move loses. null if nothing changes. */
 export function settle(room, now = Date.now()) {
   if (room.status !== "playing" || !room.deadline || now <= room.deadline) return null;
@@ -150,7 +158,8 @@ function vacate(room, seat) {
   const leaving = room.seats[seat]?.id;
   let next = room.status === "playing" ? resign(room, leaving).room : room;
   next = { ...next, seats: { ...next.seats, [seat]: null }, rematch: [] };
-  if (next.status === "ended" || !next.seats.black || !next.seats.white) next = { ...next, status: "waiting" };
+  // a finished game keeps its result on screen for whoever stays; the next join starts a new game
+  if (next.status !== "ended") next = { ...next, status: "waiting" };
   if (next.ownerId === leaving) next.ownerId = next.seats.black?.id ?? next.seats.white?.id ?? null;
   return next;
 }
@@ -251,7 +260,7 @@ export function summary(room) {
     rule: room.rule,
     locked: !!room.pwHash,
     timeLimit: room.timeLimit ?? 0,
-    status: room.status,
+    status: room.seats.black && room.seats.white ? room.status : "waiting", // an open seat = joinable
     players: (room.seats.black ? 1 : 0) + (room.seats.white ? 1 : 0),
     names: [room.seats.black?.name, room.seats.white?.name].filter(Boolean),
     updatedAt: room.updatedAt,

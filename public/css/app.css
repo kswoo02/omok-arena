@@ -313,3 +313,8 @@ main { max-width: 1180px; margin: 0 auto; padding: 0 var(--gap) 48px; outline: n
 .react-float small { display: block; font-size: 13px; color: var(--slate); background: var(--shell); border-radius: 8px; padding: 0 6px; }
 .badge.lock-b { background: rgba(29, 32, 36, .85); color: var(--shell); }
 .pw-error { margin-top: 12px; }
+.exit {
+  border: 1.5px solid var(--celadon-deep); background: transparent; cursor: pointer;
+  min-height: 36px; padding: 0 12px; border-radius: 999px; font-size: 14px; color: var(--ink-soft);
+}
+.exit:hover { color: var(--slate); border-color: var(--slate); }

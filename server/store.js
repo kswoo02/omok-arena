@@ -2,10 +2,12 @@
 import { summary } from "./game.js";
 
 export const TTL_SEC = 2 * 60 * 60; // rooms vanish 2 h after the last change
+export const LIST_LIVE_MS = 2 * 60_000; // lobby shows rooms with a seated player seen this recently
 
 export function memoryStore() {
   const rooms = new Map(); // id -> { json, expires }
   const presence = new Map(); // id -> { playerId: { name, at } }
+  const live = new Map(); // id -> last time a seated player was seen
   const alive = (id) => {
     const e = rooms.get(id);
     if (e && e.expires < Date.now()) rooms.delete(id);
@@ -32,7 +34,7 @@ export function memoryStore() {
         .map((id) => alive(id))
         .filter(Boolean)
         .map((e) => summary(JSON.parse(e.json)))
-        .filter((s) => s.players > 0 )
+        .filter((s) => s.players > 0 && Date.now() - (live.get(s.id) ?? 0) < LIST_LIVE_MS)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 50);
     },
@@ -43,6 +45,14 @@ export function memoryStore() {
     },
     async seen(id) {
       return { ...(presence.get(id) ?? {}) };
+    },
+    async markLive(id, at) {
+      live.set(id, at);
+    },
+    async remove(id) {
+      rooms.delete(id);
+      presence.delete(id);
+      live.delete(id);
     },
   };
 }
@@ -61,6 +71,7 @@ export function redisStore(redis) {
   const vk = (id) => `omok:room:${id}:v`;
   const LIST = "omok:rooms";
   const pk = (id) => `omok:room:${id}:seen`;
+  const LIVE = "omok:live";
   const parse = (v) => (v == null ? null : typeof v === "string" ? JSON.parse(v) : v);
   return {
     async get(id) {
@@ -80,12 +91,22 @@ export function redisStore(redis) {
       await redis.zremrangebyscore(LIST, 0, Date.now() - TTL_SEC * 1000);
       const ids = await redis.zrange(LIST, 0, 49, { rev: true });
       if (!ids.length) return [];
+      await redis.zremrangebyscore(LIVE, 0, Date.now() - TTL_SEC * 1000);
+      const alive = new Set(await redis.zrange(LIVE, Date.now() - LIST_LIVE_MS, "+inf", { byScore: true }));
       const rooms = await redis.mget(...ids.map(rk));
-      return rooms.map(parse).filter(Boolean).map(summary).filter((s) => s.players > 0 );
+      return rooms.map(parse).filter(Boolean).map(summary).filter((s) => s.players > 0 && alive.has(s.id));
     },
     async touch(id, playerId, info) {
       await redis.hset(pk(id), { [playerId]: JSON.stringify(info) });
       await redis.expire(pk(id), 600);
+    },
+    async markLive(id, at) {
+      await redis.zadd(LIVE, { score: at, member: id });
+    },
+    async remove(id) {
+      await redis.del(rk(id), vk(id), pk(id));
+      await redis.zrem(LIST, id);
+      await redis.zrem(LIVE, id);
     },
     async seen(id) {
       const h = (await redis.hgetall(pk(id))) ?? {};
