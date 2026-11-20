@@ -1,1 +1,125 @@
-<!doctype html><title>t</title>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#cfdcd2" />
+  <title>수담 오목</title>
+  <meta name="description" content="닉네임만 정하고 친구와 바로 두는 15×15 오목. 렌주룰과 자유룰을 지원합니다." />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" data-nav="lobby" aria-label="수담 오목 첫 화면">
+      <span class="seal" aria-hidden="true">手<br />談</span>
+      <span class="brand-name">수담 오목</span>
+    </a>
+    <button class="who" id="who" type="button" hidden></button>
+  </header>
+
+  <main id="app" tabindex="-1"></main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <template id="tpl-name">
+    <section class="name-gate">
+      <h1 class="gate-title">어떤 이름으로 둘까요?</h1>
+      <p class="gate-sub">상대에게 보이는 닉네임이에요. 가입은 필요 없어요.</p>
+      <form class="name-form">
+        <input name="nickname" maxlength="12" autocomplete="nickname" placeholder="닉네임 (최대 12자)" required />
+        <button class="btn btn-ink" type="submit">시작하기</button>
+      </form>
+    </section>
+  </template>
+
+  <template id="tpl-lobby">
+    <section class="lobby">
+      <div class="lobby-intro">
+        <h1 class="lobby-title">손으로 나누는 대화,<br />한 판 두실래요?</h1>
+        <p class="lobby-sub">방을 만들고 링크를 보내면 친구가 바로 들어와요.</p>
+      </div>
+
+      <form class="new-room" aria-labelledby="new-room-title">
+        <h2 id="new-room-title" class="h2">새 방</h2>
+        <label class="field">
+          <span>방 이름</span>
+          <input name="name" maxlength="20" placeholder="비워 두면 ‘닉네임의 방’" />
+        </label>
+        <fieldset class="rules">
+          <legend>규칙</legend>
+          <label class="rule">
+            <input type="radio" name="rule" value="renju" checked />
+            <span class="rule-body">
+              <b>렌주룰</b>
+              <small>흑은 첫 수를 중앙에 두고, 3·3, 4·4, 장목을 둘 수 없어요</small>
+            </span>
+          </label>
+          <label class="rule">
+            <input type="radio" name="rule" value="free" />
+            <span class="rule-body">
+              <b>자유룰</b>
+              <small>금수 없이 다섯 개 이상 먼저 놓으면 승리</small>
+            </span>
+          </label>
+        </fieldset>
+        <button class="btn btn-ink btn-wide" type="submit">방 만들기</button>
+      </form>
+
+      <section class="rooms" aria-labelledby="rooms-title">
+        <div class="rooms-head">
+          <h2 id="rooms-title" class="h2">열린 방</h2>
+          <button class="btn-text" type="button" data-refresh>새로고침</button>
+        </div>
+        <ol class="room-list" aria-live="polite"></ol>
+        <p class="empty" hidden>아직 열린 방이 없어요. 새 방을 만들어 친구를 불러 보세요.</p>
+      </section>
+    </section>
+  </template>
+
+  <template id="tpl-game">
+    <section class="game">
+      <div class="plate plate-top" data-plate="top"></div>
+      <div class="board-wrap">
+        <svg class="board" viewBox="0 0 640 640" role="img" aria-label="오목판"></svg>
+        <div class="stamp" aria-hidden="true"></div>
+      </div>
+      <div class="plate plate-bottom" data-plate="bottom"></div>
+
+      <aside class="panel">
+        <div class="room-meta">
+          <h1 class="room-name"></h1>
+          <span class="badge rule-badge"></span>
+        </div>
+        <p class="status" aria-live="polite"></p>
+        <div class="confirm" hidden>
+          <span class="confirm-pos"></span>
+          <button class="btn btn-ink" type="button" data-act="place">여기에 두기</button>
+          <button class="btn-text" type="button" data-act="cancel">취소</button>
+        </div>
+        <div class="actions">
+          <button class="btn btn-ink" type="button" data-act="rematch" hidden>다시 두기</button>
+          <button class="btn btn-line" type="button" data-act="invite">초대 링크 복사</button>
+          <button class="btn btn-line" type="button" data-act="resign" hidden>기권</button>
+          <button class="btn-text" type="button" data-act="leave">나가기</button>
+        </div>
+      </aside>
+    </section>
+  </template>
+
+  <dialog class="dialog" id="confirm-dialog">
+    <form method="dialog">
+      <p class="dialog-msg"></p>
+      <div class="dialog-btns">
+        <button class="btn-text" value="no">취소</button>
+        <button class="btn btn-ink" value="yes"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
