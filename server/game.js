@@ -1,4 +1,5 @@
 // Room state transitions. Pure functions: each returns { room } (a new object) or { error }.
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { BLACK, WHITE, SIZE, judge, forbiddenPoints, REASONS } from "./renju.js";
 
 const COLOR_NAME = { 1: "흑", 2: "백" };
@@ -30,18 +31,36 @@ function start(room, now) {
   return { ...fresh(room), status: "playing", deadline: room.timeLimit ? now + room.timeLimit * 1000 : null };
 }
 
+const hashPw = (salt, pw) => createHash("sha256").update(`${salt}:${pw}`).digest("hex");
+function checkPw(room, pw) {
+  if (typeof pw !== "string" || !pw) return false;
+  const a = Buffer.from(hashPw(room.pwSalt, pw), "hex");
+  const b = Buffer.from(room.pwHash, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** may this player read the room? Open rooms: anyone. Secret rooms: seated or let in by password. */
+export function canSee(room, playerId) {
+  return !room.pwHash || seatOf(room, playerId) !== null || (room.allowed ?? []).includes(playerId);
+}
+
 export function seatOf(room, playerId) {
   if (room.seats.black?.id === playerId) return "black";
   if (room.seats.white?.id === playerId) return "white";
   return null;
 }
 
-export function newRoom({ id, name, rule, player, private: priv = false, timeLimit = 0, now = Date.now() }) {
+export function newRoom({ id, name, rule, player, password = "", timeLimit = 0, now = Date.now() }) {
+  const pw = typeof password === "string" ? password : "";
+  if (pw && (pw.length < 4 || pw.length > 20)) throw new Error("비밀번호는 4~20자로 정해 주세요");
+  const pwSalt = pw ? randomBytes(8).toString("hex") : null;
   return fresh({
     id,
     name: cleanName(name, 20) || `${player.name}의 방`,
     rule: rule === "free" ? "free" : "renju",
-    private: !!priv,
+    pwSalt,
+    pwHash: pw ? hashPw(pwSalt, pw) : null,
+    allowed: [player.id],
     timeLimit: TIME_LIMITS.includes(Number(timeLimit)) ? Number(timeLimit) : 0,
     seats: { black: { id: player.id, name: player.name }, white: null },
     ownerId: player.id,
@@ -57,11 +76,17 @@ export function newRoom({ id, name, rule, player, private: priv = false, timeLim
 }
 
 /** sit in a free seat (black first), or return the seat already held; null seat = spectator */
-export function join(room, player, now = Date.now()) {
+export function join(room, player, now = Date.now(), { password } = {}) {
   const held = seatOf(room, player.id);
   if (held) {
     const seats = { ...room.seats, [held]: { id: player.id, name: player.name } };
     return { room: { ...room, seats }, seat: held };
+  }
+  if (!canSee(room, player.id)) {
+    if (!checkPw(room, password)) {
+      return err(403, "password", password ? "비밀번호가 맞지 않아요" : "비밀방이에요. 비밀번호를 입력해 주세요");
+    }
+    room = { ...room, allowed: [...(room.allowed ?? []), player.id].slice(-50) };
   }
   if ((room.kicked ?? []).includes(player.id)) return { room, seat: null };
   const seat = !room.seats.black ? "black" : !room.seats.white ? "white" : null;
@@ -197,7 +222,7 @@ export function view(room, playerId, { seen = null, now = Date.now() } = {}) {
     id: room.id,
     name: room.name,
     rule: room.rule,
-    private: !!room.private,
+    locked: !!room.pwHash,
     timeLimit: room.timeLimit ?? 0,
     deadline: room.deadline ?? null,
     serverNow: now,
@@ -224,7 +249,7 @@ export function summary(room) {
     id: room.id,
     name: room.name,
     rule: room.rule,
-    private: !!room.private,
+    locked: !!room.pwHash,
     timeLimit: room.timeLimit ?? 0,
     status: room.status,
     players: (room.seats.black ? 1 : 0) + (room.seats.white ? 1 : 0),

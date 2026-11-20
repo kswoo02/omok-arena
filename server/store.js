@@ -32,7 +32,7 @@ export function memoryStore() {
         .map((id) => alive(id))
         .filter(Boolean)
         .map((e) => summary(JSON.parse(e.json)))
-        .filter((s) => s.players > 0 && !s.private)
+        .filter((s) => s.players > 0 )
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 50);
     },
@@ -81,7 +81,7 @@ export function redisStore(redis) {
       const ids = await redis.zrange(LIST, 0, 49, { rev: true });
       if (!ids.length) return [];
       const rooms = await redis.mget(...ids.map(rk));
-      return rooms.map(parse).filter(Boolean).map(summary).filter((s) => s.players > 0 && !s.private);
+      return rooms.map(parse).filter(Boolean).map(summary).filter((s) => s.players > 0 );
     },
     async touch(id, playerId, info) {
       await redis.hset(pk(id), { [playerId]: JSON.stringify(info) });

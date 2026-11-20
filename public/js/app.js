@@ -43,6 +43,20 @@ $("#who").addEventListener("click", () => {
   route();
 });
 
+// passwords typed for secret rooms, kept for this tab so a reload does not ask again
+function rememberPw(id, pw) {
+  try {
+    if (pw) sessionStorage.setItem(`omok:pw:${id}`, pw);
+  } catch {}
+}
+function savedPw(id) {
+  try {
+    return sessionStorage.getItem(`omok:pw:${id}`) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ---------------- routing ----------------
 let cleanup = () => {};
 function go(roomId) {
@@ -119,6 +133,12 @@ function lobby() {
     badge.className = `badge ${r.rule}`;
     badge.textContent = r.rule === "renju" ? "렌주" : "자유";
     title.append(" ", badge);
+    if (r.locked) {
+      const lock = document.createElement("span");
+      lock.className = "badge lock-b";
+      lock.textContent = "🔒 비밀방";
+      title.append(" ", lock);
+    }
     if (r.timeLimit) {
       const clock = document.createElement("span");
       clock.className = "badge clock-b";
@@ -148,15 +168,26 @@ function lobby() {
     const btn = form.querySelector("button[type=submit]");
     btn.disabled = true;
     try {
+      const password = form.secret.checked ? form.password.value : "";
+      if (form.secret.checked && (password.length < 4 || password.length > 20)) {
+        btn.disabled = false;
+        form.password.focus();
+        return toast("비밀번호는 4~20자로 정해 주세요.");
+      }
       const { room } = await api.create(form.name.value, form.rule.value, {
         timeLimit: Number(form.timeLimit.value),
-        private: form.private.checked,
+        ...(password ? { password } : {}),
       });
+      rememberPw(room.id, password);
       go(room.id);
     } catch (err) {
       toast(err.message);
       btn.disabled = false;
     }
+  });
+  form.secret.addEventListener("change", () => {
+    $(".pw-field").hidden = !form.secret.checked;
+    if (form.secret.checked) form.password.focus();
   });
   $("[data-refresh]").addEventListener("click", load);
 
@@ -169,7 +200,7 @@ function lobby() {
 }
 
 // ---------------- game ----------------
-function game(id) {
+function game(id, initial = null) {
   mount("tpl-game");
   const svg = $(".board");
   const plates = { top: $("[data-plate=top]"), bottom: $("[data-plate=bottom]") };
@@ -338,7 +369,7 @@ function game(id) {
     badge.textContent = room.rule === "renju" ? "렌주룰" : "자유룰";
     badge.className = `badge rule-badge ${room.rule}`;
     $(".room-meta").querySelectorAll(".meta-extra").forEach((n) => n.remove());
-    for (const [on, text, cls] of [[room.timeLimit, `한 수 ${room.timeLimit}초`, "clock-b"], [room.private, "비공개", ""]]) {
+    for (const [on, text, cls] of [[room.timeLimit, `한 수 ${room.timeLimit}초`, "clock-b"], [room.locked, "🔒 비밀방", "lock-b"]]) {
       if (!on) continue;
       const b = document.createElement("span");
       b.className = `badge meta-extra ${cls}`;
@@ -512,13 +543,49 @@ function game(id) {
   const ping = () => document.visibilityState === "visible" && api.ping(id).catch(() => {});
   const pingTimer = setInterval(ping, 20_000);
 
+  async function enter(password) {
+    const { room: r, seat } = await api.join(id, password);
+    if (password) rememberPw(id, password);
+    apply(r);
+    if (!seat) toast("자리가 다 찼어요. 관전으로 들어왔어요.");
+    connect();
+  }
+
+  function askPassword(info, message) {
+    app.replaceChildren($("#tpl-password").content.cloneNode(true));
+    $(".gate-sub").textContent = `${info?.name ?? "이 방"}에 들어가려면 방장이 정한 비밀번호가 필요해요.`;
+    const err = $(".pw-error");
+    if (message) err.hidden = false, (err.textContent = message);
+    const form = $(".pw-form");
+    form.password.focus();
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const pw = form.password.value;
+      try {
+        const { room: r, seat } = await api.join(id, pw);
+        rememberPw(id, pw);
+        // the password screen replaced the game; rebuild it and continue with the joined room
+        cleanup();
+        cleanup = game(id, { room: r, seat });
+      } catch (e2) {
+        err.hidden = false;
+        err.textContent = e2.message;
+        form.password.select();
+      }
+    });
+  }
+
   (async () => {
     try {
-      const { room: r, seat } = await api.join(id);
-      apply(r);
-      if (!seat) toast("자리가 다 찼어요. 관전으로 들어왔어요.");
-      connect();
+      if (initial) {
+        apply(initial.room);
+        if (!initial.seat) toast("자리가 다 찼어요. 관전으로 들어왔어요.");
+        connect();
+        return;
+      }
+      await enter(savedPw(id));
     } catch (e) {
+      if (e.code === "password") return askPassword(e.room, savedPw(id) ? e.message : "");
       app.replaceChildren();
       const p = document.createElement("section");
       p.className = "name-gate";

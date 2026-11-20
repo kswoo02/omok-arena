@@ -150,16 +150,31 @@ async function waitAny(id, playerId, pred, timeout = 9000) {
   throw new Error("no matching event");
 }
 
-test("private room is hidden from the lobby but joinable by link", async () => {
-  const c = await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free", private: true, timeLimit: 30 });
+test("secret room: listed, password checked on join, strangers cannot read it", async () => {
+  const c = await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free", password: "4321", timeLimit: 30 });
+  assert.equal(c.status, 201);
   const id = c.json.room.id;
-  assert.equal(c.json.room.private, true);
+  assert.equal(c.json.room.locked, true);
   assert.equal(c.json.room.timeLimit, 30);
   const list = await call("GET", "/api/rooms");
-  assert.equal(list.json.rooms.some((r) => r.id === id), false);
-  const j = await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B" });
+  assert.equal(list.json.rooms.find((r) => r.id === id).locked, true);
+  const peek = await call("GET", `/api/rooms/${id}?playerId=${PB}`);
+  assert.equal(peek.status, 403);
+  assert.equal(peek.json.error.code, "password");
+  assert.equal(peek.json.error.room.name, "A의 방");
+  assert.equal(peek.json.error.room.board, undefined);
+  const wrong = await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B", password: "0000" });
+  assert.equal(wrong.status, 403);
+  const j = await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B", password: "4321" });
   assert.equal(j.json.seat, "white");
   assert.ok(j.json.room.deadline > Date.now() + 25_000);
+  assert.equal((await call("GET", `/api/rooms/${id}?playerId=${PB}`)).status, 200);
+  // a wrong guess must not show up as a spectator
+  await call("POST", `/api/rooms/${id}/join`, { playerId: PC, nickname: "몰래", password: "nope" });
+  const seenBy = await call("GET", `/api/rooms/${id}?playerId=${PA}`);
+  assert.deepEqual(seenBy.json.room.spectators, []);
+  const short = await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free", password: "12" });
+  assert.equal(short.status, 400);
 });
 
 test("spectator shows up in presence; reactions and rematch decline reach the other side", async () => {

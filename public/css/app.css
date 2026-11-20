@@ -311,3 +311,5 @@ main { max-width: 1180px; margin: 0 auto; padding: 0 var(--gap) 48px; outline: n
   animation: float-up 2.2s ease-out forwards; text-align: center;
 }
 .react-float small { display: block; font-size: 13px; color: var(--slate); background: var(--shell); border-radius: 8px; padding: 0 6px; }
+.badge.lock-b { background: rgba(29, 32, 36, .85); color: var(--shell); }
+.pw-error { margin-top: 12px; }

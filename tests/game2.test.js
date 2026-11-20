@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  newRoom, join, move, leave, rematch, declineRematch, react, kick, settle, view, EMOJIS,
+  newRoom, join, move, leave, rematch, declineRematch, react, kick, settle, view, EMOJIS, canSee,
 } from "../server/game.js";
 import { memoryStore } from "../server/store.js";
 import { CENTER } from "../server/renju.js";
@@ -103,15 +103,41 @@ test("ownership passes to the remaining player when the owner leaves", () => {
   assert.equal(view(room, "pb").owner, true);
 });
 
-test("private rooms are not listed", async () => {
+test("secret room: listed with a lock, password needed to enter, never exposed", async () => {
   const s = memoryStore();
-  const pub = { ...newRoom({ id: "pub1", name: "", rule: "free", player: A }), version: 1 };
-  const prv = { ...newRoom({ id: "prv1", name: "", rule: "free", player: A, private: true }), version: 1 };
-  await s.put(pub, 0);
-  await s.put(prv, 0);
-  const ids = (await s.list()).map((r) => r.id);
-  assert.deepEqual(ids, ["pub1"]);
-  assert.equal(view(prv, "pa").private, true);
+  const sec = { ...newRoom({ id: "sec1", name: "", rule: "free", player: A, password: "1234" }), version: 1 };
+  await s.put(sec, 0);
+  const listed = (await s.list()).find((r) => r.id === "sec1");
+  assert.equal(listed.locked, true);
+  assert.equal(JSON.stringify(listed).includes("1234"), false);
+
+  assert.equal(join(sec, B, T0).error.code, "password");
+  assert.equal(join(sec, B, T0, { password: "9999" }).error.code, "password");
+  const ok1 = join(sec, B, T0, { password: "1234" });
+  assert.equal(ok1.seat, "white");
+  const room = ok1.room;
+  // seated player refreshes: no password needed
+  assert.equal(join(room, B, T0 + 1).seat, "white");
+  // a spectator also needs it; once let in, comes back without it
+  assert.equal(join(room, C, T0).error.code, "password");
+  const spec = join(room, C, T0, { password: "1234" });
+  assert.equal(spec.seat, null);
+  assert.equal(join(spec.room, C, T0 + 5).seat, null);
+  assert.equal(join(spec.room, C, T0 + 5).error, undefined);
+
+  assert.equal(canSee(spec.room, "pc"), true);
+  assert.equal(canSee(spec.room, "zz"), false);
+  const v = view(spec.room, "pa");
+  assert.equal(v.locked, true);
+  const raw = JSON.stringify(v);
+  assert.equal(raw.includes("1234") || raw.includes(spec.room.pwHash), false);
+});
+
+test("rooms without a password are open; short passwords are rejected", () => {
+  const open = newRoom({ id: "o1", name: "", rule: "free", player: A });
+  assert.equal(view(open, "pa").locked, false);
+  assert.equal(canSee(open, "anyone"), true);
+  assert.throws(() => newRoom({ id: "o2", name: "", rule: "free", player: A, password: "12" }), /4/);
 });
 
 test("presence: touch and seen", async () => {

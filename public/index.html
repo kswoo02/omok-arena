@@ -36,6 +36,19 @@
     </section>
   </template>
 
+  <template id="tpl-password">
+    <section class="name-gate">
+      <h1 class="gate-title">🔒 비밀방이에요</h1>
+      <p class="gate-sub"></p>
+      <form class="name-form pw-form">
+        <input name="password" type="password" maxlength="20" autocomplete="off" placeholder="비밀번호" required />
+        <button class="btn btn-ink" type="submit">들어가기</button>
+      </form>
+      <p class="pw-error status warn" hidden></p>
+      <a class="btn-text" href="/" data-nav="lobby">로비로 돌아가기</a>
+    </section>
+  </template>
+
   <template id="tpl-lobby">
     <section class="lobby">
       <div class="lobby-intro">
@@ -75,8 +88,12 @@
           </div>
         </fieldset>
         <label class="check">
-          <input type="checkbox" name="private" />
-          <span>비공개 방 <small>목록에 안 보이고 초대 링크로만 들어와요</small></span>
+          <input type="checkbox" name="secret" />
+          <span>비밀방 <small>비밀번호를 아는 사람만 들어올 수 있어요</small></span>
+        </label>
+        <label class="field pw-field" hidden>
+          <span>비밀번호 (4~20자)</span>
+          <input name="password" type="password" minlength="4" maxlength="20" autocomplete="new-password" />
         </label>
         <button class="btn btn-ink btn-wide" type="submit">방 만들기</button>
       </form>

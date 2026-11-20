@@ -16,7 +16,8 @@ async function open(name, opts) {
   const ctx = await browser.newContext(opts);
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`[${name}] ${e.message}`));
-  page.on("console", (m) => m.type() === "error" && errors.push(`[${name}] ${m.text()}`));
+  // 403 responses are expected while a secret room asks for its password
+  page.on("console", (m) => m.type() === "error" && !m.text().includes("status of 403") && errors.push(`[${name}] ${m.text()}`));
   return page;
 }
 async function enterName(page, name) {
@@ -132,21 +133,33 @@ await A.waitForFunction(() => document.querySelector(".watchers")?.innerText.inc
 check("PC sees the spectator listed", true);
 await C.close();
 
-// ---- free rule: a real five wins (private room with a 60 s clock)
+// ---- free rule: a real five wins (secret room with a password and a 60 s clock)
 await A.goto(BASE);
 await A.locator("label.rule", { hasText: "자유룰" }).click();
 await A.locator(".seg label", { hasText: "60초" }).click();
 await A.locator("label.check").click();
+await A.locator("input[name=password]").fill("7777");
 await A.getByRole("button", { name: "방 만들기" }).click();
 await A.waitForURL(/\?room=/);
 await B.goto(A.url());
+await B.waitForSelector("text=비밀방이에요");
+check("secret room asks the phone for a password", true);
+await B.locator("input[name=password]").fill("1111");
+await B.getByRole("button", { name: "들어가기" }).tap();
+await B.waitForSelector(".pw-error:not([hidden])");
+check("wrong password is refused", (await B.locator(".pw-error").innerText()).includes("맞지 않아요"));
+await B.locator("input[name=password]").fill("7777");
+await B.getByRole("button", { name: "들어가기" }).tap();
 await B.waitForSelector(".plate-bottom >> text=밥");
 await A.waitForSelector(".plate-top >> text=밥");
+await B.reload();
+await B.waitForSelector(".plate-bottom >> text=밥");
+check("reload in a secret room does not ask again", true);
 await A.waitForSelector(".plate-clock");
 const clock1 = await A.locator(".plate-clock").innerText();
 check(`move clock counts down (${clock1})`, /^[01]:\d\d$/.test(clock1) && clock1 !== "0:00");
-const listed = await A.evaluate(async (u) => (await (await fetch("/api/rooms")).json()).rooms.some((r) => u.includes(r.id)), A.url());
-check("private room hidden from the lobby list", listed === false);
+const listed = await A.evaluate(async (u) => (await (await fetch("/api/rooms")).json()).rooms.find((r) => u.includes(r.id)), A.url());
+check("secret room is listed with a lock", listed?.locked === true);
 for (let i = 0; i < 5; i++) {
   await hit(A, at(i, 0));
   await waitStones(B, i * 2 + 1);

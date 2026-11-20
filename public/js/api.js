@@ -26,10 +26,11 @@ export function playerId() {
 export const nickname = (v) => (v === undefined ? store(KEY_NAME) : store(KEY_NAME, v));
 
 export class ApiError extends Error {
-  constructor(status, code, reason) {
+  constructor(status, code, reason, extra = {}) {
     super(reason);
     this.status = status;
     this.code = code;
+    this.room = extra.room ?? null;
   }
 }
 
@@ -45,7 +46,7 @@ async function call(method, path, body) {
     throw new ApiError(0, "network", "서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.");
   }
   const json = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, json.error?.code ?? "error", json.error?.reason ?? "요청을 처리하지 못했어요.");
+  if (!r.ok) throw new ApiError(r.status, json.error?.code ?? "error", json.error?.reason ?? "요청을 처리하지 못했어요.", json.error ?? {});
   return json;
 }
 
@@ -55,7 +56,7 @@ export const api = {
   rooms: () => call("GET", "/api/rooms"),
   create: (name, rule, opts = {}) => call("POST", "/api/rooms", { ...me(), name, rule, ...opts }),
   room: (id) => call("GET", `/api/rooms/${id}?playerId=${encodeURIComponent(playerId())}`),
-  join: (id) => call("POST", `/api/rooms/${id}/join`, me()),
+  join: (id, password) => call("POST", `/api/rooms/${id}/join`, { ...me(), ...(password ? { password } : {}) }),
   move: (id, idx) => call("POST", `/api/rooms/${id}/move`, { playerId: playerId(), idx }),
   resign: (id) => call("POST", `/api/rooms/${id}/resign`, { playerId: playerId() }),
   leave: (id) => call("POST", `/api/rooms/${id}/leave`, { playerId: playerId() }),

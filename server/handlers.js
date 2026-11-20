@@ -1,6 +1,6 @@
 // HTTP routing shared by the Vercel function (api/index.js) and dev-server.js.
 import { randomBytes } from "node:crypto";
-import { cleanName, declineRematch, join, kick, leave, move, newRoom, react, rematch, resign, settle, view } from "./game.js";
+import { canSee, cleanName, declineRematch, join, kick, leave, move, newRoom, react, rematch, resign, settle, view } from "./game.js";
 
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const ROOM_RE = /^[a-z0-9]{6,12}$/;
@@ -55,10 +55,12 @@ export async function route({ method, path, query = {}, body = {} }, store) {
       if (e) return e;
       const player = needName();
       if (!player) return bad("nickname", "닉네임을 입력해 주세요");
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password && (password.length < 4 || password.length > 20)) return bad("password_rule", "비밀번호는 4~20자로 정해 주세요");
       for (let i = 0; i < 5; i++) {
         const room = {
           ...newRoom({ id: newRoomId(), name: body.name, rule: body.rule, player,
-            private: body.private === true, timeLimit: Number(body.timeLimit) || 0 }),
+            password, timeLimit: Number(body.timeLimit) || 0 }),
           version: 1,
         };
         if (await store.put(room, 0)) {
@@ -78,20 +80,28 @@ export async function route({ method, path, query = {}, body = {} }, store) {
   if (!action && method === "GET") {
     const room = await store.get(id);
     if (!room) return bad("not_found", "방이 없어요. 시간이 지나 사라졌을 수 있어요.", 404);
+    if (!canSee(room, playerId)) return locked(room);
     if (settle(room, Date.now())) return mutate(store, id, playerId, (r) => ({ room: r }));
     return res(200, { room: view(room, playerId, { seen: await store.seen(id) }) });
   }
   if (method !== "POST") return bad("method", "지원하지 않는 요청이에요", 405);
   const e = needPlayer();
   if (e) return e;
+  if (action !== "join") {
+    const room = await store.get(id);
+    if (room && !canSee(room, playerId)) return locked(room);
+  }
 
   switch (action) {
     case "join": {
       const player = needName();
       if (!player) return bad("nickname", "닉네임을 입력해 주세요");
       if (!(await store.get(id))) return bad("not_found", "방이 없어요. 시간이 지나 사라졌을 수 있어요.", 404);
-      await store.touch(id, playerId, { name: player.name, at: Date.now() });
-      return mutate(store, id, playerId, (r, _s, now) => join(r, player, now));
+      const password = typeof body.password === "string" ? body.password : undefined;
+      const out = await mutate(store, id, playerId, (r, _s, now) => join(r, player, now, { password }));
+      // only people who got in count as present (a wrong password must not appear as a spectator)
+      if (out.status === 200) await store.touch(id, playerId, { name: player.name, at: Date.now() });
+      return out;
     }
     case "move": {
       const idx = typeof body.idx === "number" ? body.idx : NaN;
@@ -121,6 +131,12 @@ export async function route({ method, path, query = {}, body = {} }, store) {
   }
 }
 
+/** secret room seen by someone not let in: name and rule only */
+function locked(room) {
+  return res(403, { error: { code: "password", reason: "비밀방이에요. 비밀번호를 입력해 주세요",
+    room: { name: room.name, rule: room.rule, locked: true } } });
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -135,6 +151,11 @@ export async function stream({ id, playerId, since = -1 }, store, write, isClose
   let ping = Date.now();
   let deadline = null;
   let presenceKey = "";
+  const first = await store.get(id);
+  if (first && !canSee(first, playerId)) {
+    write(`event: locked\ndata: {}\n\n`);
+    return;
+  }
   for (let tick = 0; !isClosed() && Date.now() < end; tick++) {
     const now = Date.now();
     if (deadline && now > deadline + 300) {
