@@ -118,3 +118,73 @@ test("forbidden and invalid requests", async () => {
   assert.equal((await call("GET", `/api/rooms/zzzzzzzz`)).status, 404);
   assert.equal((await call("POST", `/api/rooms`, { playerId: PA, nickname: "   " })).status, 400);
 });
+
+const PC = "player_cccccccc";
+
+/** read SSE events of any type until pred(event, data) */
+async function waitAny(id, playerId, pred, timeout = 9000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeout);
+  const r = await fetch(`${base}/api/rooms/${id}/stream?playerId=${playerId}`, { signal: ac.signal });
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const ev = /event: (\w+)/.exec(block)?.[1];
+        const data = /data: (.*)/.exec(block)?.[1];
+        if (ev && data && pred(ev, JSON.parse(data))) return JSON.parse(data);
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    ac.abort();
+  }
+  throw new Error("no matching event");
+}
+
+test("private room is hidden from the lobby but joinable by link", async () => {
+  const c = await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free", private: true, timeLimit: 30 });
+  const id = c.json.room.id;
+  assert.equal(c.json.room.private, true);
+  assert.equal(c.json.room.timeLimit, 30);
+  const list = await call("GET", "/api/rooms");
+  assert.equal(list.json.rooms.some((r) => r.id === id), false);
+  const j = await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B" });
+  assert.equal(j.json.seat, "white");
+  assert.ok(j.json.room.deadline > Date.now() + 25_000);
+});
+
+test("spectator shows up in presence; reactions and rematch decline reach the other side", async () => {
+  const id = (await call("POST", "/api/rooms", { playerId: PA, nickname: "앨리스", rule: "free" })).json.room.id;
+  await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "밥" });
+  const spec = await call("POST", `/api/rooms/${id}/join`, { playerId: PC, nickname: "찰리" });
+  assert.equal(spec.json.seat, null);
+  const pres = await waitAny(id, PA, (ev) => ev === "presence");
+  assert.deepEqual(pres.spectators, ["찰리"]);
+  assert.equal(pres.online.white, true);
+
+  const got = waitAny(id, PA, (ev, d) => ev === "room" && d.reaction?.emoji === "🔥");
+  const r = await call("POST", `/api/rooms/${id}/react`, { playerId: PC, nickname: "찰리", emoji: "🔥" });
+  assert.equal(r.status, 200);
+  const room = await got;
+  assert.equal(room.reaction.name, "찰리");
+  assert.equal((await call("POST", `/api/rooms/${id}/react`, { playerId: PC, nickname: "찰리", emoji: "👍" })).status, 429);
+
+  await call("POST", `/api/rooms/${id}/resign`, { playerId: PB });
+  await call("POST", `/api/rooms/${id}/rematch`, { playerId: PA });
+  const d = await call("POST", `/api/rooms/${id}/decline`, { playerId: PB });
+  assert.equal(d.json.room.rematch.declined, 1);
+  const kicked = await call("POST", `/api/rooms/${id}/kick`, { playerId: PA });
+  assert.equal(kicked.status, 200);
+  assert.equal(kicked.json.room.seats.white, null);
+  const back = await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "밥" });
+  assert.equal(back.json.seat, null);
+});
