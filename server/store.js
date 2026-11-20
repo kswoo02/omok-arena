@@ -1,5 +1,9 @@
 // Room storage with compare-and-set on `version`. Memory (local/tests) or Upstash Redis.
+import { randomBytes } from "node:crypto";
 import { summary } from "./game.js";
+
+export const LOG_KEEP_MS = 7 * 86_400_000;
+const LOG_MAX = 5000;
 
 export const TTL_SEC = 2 * 60 * 60; // rooms vanish 2 h after the last change
 export const LIST_LIVE_MS = 2 * 60_000; // lobby shows rooms with a seated player seen this recently
@@ -8,6 +12,9 @@ export function memoryStore() {
   const rooms = new Map(); // id -> { json, expires }
   const presence = new Map(); // id -> { playerId: { name, at } }
   const live = new Map(); // id -> last time a seated player was seen
+  let logs = [];
+  const banned = new Map();
+  const fails = new Map(); // ip -> { n, until }
   const alive = (id) => {
     const e = rooms.get(id);
     if (e && e.expires < Date.now()) rooms.delete(id);
@@ -54,6 +61,41 @@ export function memoryStore() {
       presence.delete(id);
       live.delete(id);
     },
+    async allRooms() {
+      return [...rooms.keys()].map((id) => alive(id)).filter(Boolean)
+        .map((e) => ({ ...summary(JSON.parse(e.json)), liveAt: live.get(JSON.parse(e.json).id) ?? null }))
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+    },
+    async addLog(entry) {
+      logs.push(entry);
+      const cutoff = Date.now() - LOG_KEEP_MS;
+      logs = logs.filter((l) => l.at >= cutoff).slice(-LOG_MAX);
+    },
+    async logs() {
+      const cutoff = Date.now() - LOG_KEEP_MS;
+      return logs.filter((l) => l.at >= cutoff).slice().reverse();
+    },
+    async ban(ip, info) {
+      banned.set(ip, info);
+    },
+    async unban(ip) {
+      banned.delete(ip);
+    },
+    async bans() {
+      return Object.fromEntries(banned);
+    },
+    async isBanned(ip) {
+      return banned.has(ip);
+    },
+    async adminFail(ip) {
+      const f = fails.get(ip);
+      const now = Date.now();
+      fails.set(ip, f && f.until > now ? { n: f.n + 1, until: f.until } : { n: 1, until: now + 900_000 });
+    },
+    async adminFails(ip) {
+      const f = fails.get(ip);
+      return f && f.until > Date.now() ? f.n : 0;
+    },
   };
 }
 
@@ -72,6 +114,8 @@ export function redisStore(redis) {
   const LIST = "omok:rooms";
   const pk = (id) => `omok:room:${id}:seen`;
   const LIVE = "omok:live";
+  const LOG = "omok:log";
+  const BANS = "omok:bans";
   const parse = (v) => (v == null ? null : typeof v === "string" ? JSON.parse(v) : v);
   return {
     async get(id) {
@@ -107,6 +151,49 @@ export function redisStore(redis) {
       await redis.del(rk(id), vk(id), pk(id));
       await redis.zrem(LIST, id);
       await redis.zrem(LIVE, id);
+    },
+    async allRooms() {
+      const ids = await redis.zrange(LIST, 0, 199, { rev: true });
+      if (!ids.length) return [];
+      const rooms = await redis.mget(...ids.map(rk));
+      const out = [];
+      for (const r of rooms.map(parse).filter(Boolean)) {
+        const liveAt = await redis.zscore(LIVE, r.id);
+        out.push({ ...summary(r), liveAt: liveAt == null ? null : Number(liveAt) });
+      }
+      return out;
+    },
+    async addLog(entry) {
+      const member = JSON.stringify({ ...entry, k: randomBytes(4).toString("hex") });
+      await redis.zadd(LOG, { score: entry.at, member });
+      await redis.zremrangebyscore(LOG, 0, Date.now() - LOG_KEEP_MS);
+      await redis.zremrangebyrank(LOG, 0, -(LOG_MAX + 1));
+    },
+    async logs() {
+      const rows = await redis.zrange(LOG, 0, LOG_MAX - 1, { rev: true });
+      const cutoff = Date.now() - LOG_KEEP_MS;
+      return rows.map(parse).filter((l) => l && l.at >= cutoff);
+    },
+    async ban(ip, info) {
+      await redis.hset(BANS, { [ip]: JSON.stringify(info) });
+    },
+    async unban(ip) {
+      await redis.hdel(BANS, ip);
+    },
+    async bans() {
+      const h = (await redis.hgetall(BANS)) ?? {};
+      return Object.fromEntries(Object.entries(h).map(([k, v]) => [k, parse(v)]));
+    },
+    async isBanned(ip) {
+      return Boolean(await redis.hexists(BANS, ip));
+    },
+    async adminFail(ip) {
+      const k = `omok:adminfail:${ip}`;
+      await redis.incr(k);
+      await redis.expire(k, 900);
+    },
+    async adminFails(ip) {
+      return Number((await redis.get(`omok:adminfail:${ip}`)) ?? 0);
     },
     async seen(id) {
       const h = (await redis.hgetall(pk(id))) ?? {};

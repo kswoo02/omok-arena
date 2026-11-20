@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>수담 오목 관리</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="stylesheet" href="/css/admin.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" aria-label="수담 오목 첫 화면">
+      <span class="seal" aria-hidden="true">手<br />談</span>
+      <span class="brand-name">관리</span>
+    </a>
+    <button class="exit" id="logout" type="button" hidden>로그아웃</button>
+  </header>
+
+  <main id="admin">
+    <section class="name-gate" id="login">
+      <h1 class="gate-title">관리자 로그인</h1>
+      <p class="gate-sub">접속 기록과 열린 방을 보고, 문제 있는 IP를 차단할 수 있어요.</p>
+      <form class="login-form">
+        <input name="id" autocomplete="username" placeholder="아이디" required />
+        <input name="password" type="password" autocomplete="current-password" placeholder="비밀번호" required />
+        <button class="btn btn-ink" type="submit">로그인</button>
+      </form>
+      <p class="status warn" id="login-error" hidden></p>
+    </section>
+
+    <section id="dash" hidden>
+      <dl class="stats" id="stats"></dl>
+
+      <section class="block">
+        <div class="block-head">
+          <h2 class="h2">접속 기록</h2>
+          <label class="auto"><input type="checkbox" id="auto" checked /> 10초마다 새로고침</label>
+        </div>
+        <form class="filters" id="filters">
+          <input name="ip" placeholder="IP" />
+          <input name="name" placeholder="닉네임" />
+          <input name="room" placeholder="방 ID" />
+          <select name="type" aria-label="종류">
+            <option value="">모든 종류</option>
+          </select>
+          <button class="btn btn-ink" type="submit">찾기</button>
+          <button class="btn-text" type="reset">지우기</button>
+        </form>
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr><th>시각</th><th>종류</th><th>닉네임</th><th>방</th><th>IP</th><th>지역</th><th>기기</th><th>내용</th><th></th></tr></thead>
+            <tbody id="logs"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="logs-empty" hidden>조건에 맞는 기록이 없어요.</p>
+      </section>
+
+      <section class="block">
+        <h2 class="h2">방</h2>
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr><th>방</th><th>이름</th><th>규칙</th><th>상태</th><th>대국자</th><th>마지막 접속</th></tr></thead>
+            <tbody id="rooms"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="rooms-empty" hidden>지금 열린 방이 없어요.</p>
+      </section>
+
+      <section class="block">
+        <h2 class="h2">차단한 IP</h2>
+        <form class="filters" id="ban-form">
+          <input name="ip" placeholder="차단할 IP" required />
+          <input name="reason" placeholder="사유 (선택)" maxlength="60" />
+          <button class="btn btn-ink" type="submit">차단</button>
+        </form>
+        <div class="table-wrap">
+          <table class="grid">
+            <thead><tr><th>IP</th><th>사유</th><th>차단 시각</th><th></th></tr></thead>
+            <tbody id="bans"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="bans-empty" hidden>차단한 IP가 없어요.</p>
+      </section>
+
+      <p class="note">기록은 7일 동안 보관된 뒤 자동으로 지워져요. 시각은 한국 시간이에요.</p>
+    </section>
+  </main>
+
+  <dialog class="dialog" id="confirm-dialog">
+    <form method="dialog">
+      <p class="dialog-msg"></p>
+      <div class="dialog-btns">
+        <button class="btn-text" value="no">취소</button>
+        <button class="btn btn-ink" value="yes"></button>
+      </div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

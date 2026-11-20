@@ -225,3 +225,36 @@ test("one of two leaving keeps the room for the other", async () => {
   const listed = (await call("GET", "/api/rooms")).json.rooms.find((x) => x.id === id);
   assert.equal(listed.status, "waiting"); // lobby shows it as joinable
 });
+
+test("admin: login, logs with ip and device, ban blocks the player api", async () => {
+  const { setAdminConfig } = await import("../server/admin.js");
+  setAdminConfig({ id: "boss", password: "pw-1234", secret: "test-secret-xyz" });
+  const H = { "Content-Type": "application/json", "X-Real-IP": "203.0.113.7", "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile/15E148 Safari/604.1" };
+  const post = (path, body, headers = H) =>
+    fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }));
+  const id = (await post("/api/rooms", { playerId: "player_iplogged1", nickname: "기록됨", rule: "free" })).json.room.id;
+
+  assert.equal((await call("GET", "/api/admin/logs")).status, 401);
+  assert.equal((await call("POST", "/api/admin/login", { id: "boss", password: "nope" })).status, 401);
+  const login = await call("POST", "/api/admin/login", { id: "boss", password: "pw-1234" });
+  assert.equal(login.status, 200);
+  const auth = { "Content-Type": "application/json", Authorization: `Bearer ${login.json.token}` };
+  const get = (path) => fetch(base + path, { headers: auth }).then(async (r) => ({ status: r.status, json: await r.json() }));
+
+  const logs = await get("/api/admin/logs?ip=203.0.113.7");
+  const created = logs.json.logs.find((l) => l.type === "create" && l.room === id);
+  assert.ok(created, JSON.stringify(logs.json));
+  assert.equal(created.name, "기록됨");
+  assert.equal(created.device, "휴대폰 · iOS · Safari");
+  assert.ok((await get("/api/admin/rooms")).json.rooms.some((r) => r.id === id));
+  assert.ok((await get("/api/admin/stats")).json.todayIps >= 1);
+
+  const b = await fetch(base + "/api/admin/ban", { method: "POST", headers: auth, body: JSON.stringify({ ip: "203.0.113.7", reason: "테스트" }) });
+  assert.equal(b.status, 200);
+  const blocked = await post("/api/rooms", { playerId: "player_iplogged1", nickname: "기록됨", rule: "free" });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.json.error.code, "banned");
+  await fetch(base + "/api/admin/unban", { method: "POST", headers: auth, body: JSON.stringify({ ip: "203.0.113.7" }) });
+  assert.equal((await post("/api/rooms", { playerId: "player_iplogged1", nickname: "기록됨", rule: "free" })).status, 201);
+  setAdminConfig(null);
+});

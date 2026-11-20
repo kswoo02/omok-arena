@@ -21,7 +21,8 @@ export function createApp() {
   return createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (url.pathname.startsWith("/api/")) return handler(req, res);
-    const rel = normalize(url.pathname === "/" ? "/index.html" : url.pathname).replace(/^(\.\.[/\\])+/, "");
+    const page = url.pathname === "/" ? "/index.html" : url.pathname === "/admin" ? "/admin.html" : url.pathname;
+    const rel = normalize(page).replace(/^(\.\.[/\\])+/, "");
     try {
       const data = await readFile(join(ROOT, rel));
       res.writeHead(200, { "Content-Type": TYPES[extname(rel)] || "application/octet-stream" });

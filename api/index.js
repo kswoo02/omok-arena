@@ -1,5 +1,6 @@
 // Single Vercel function for every /api/* path (see vercel.json rewrite).
 import { Redis } from "@upstash/redis";
+import { adminRoute, clientIp } from "../server/admin.js";
 import { route, stream } from "../server/handlers.js";
 import { memoryStore, redisStore } from "../server/store.js";
 
@@ -37,12 +38,53 @@ function safeParse(s) {
   }
 }
 
+// banned IPs, cached briefly per function instance to save Redis calls
+const banCache = new Map();
+async function banned(s, ip) {
+  const c = banCache.get(ip);
+  if (c && c.until > Date.now()) return c.v;
+  const v = await s.isBanned(ip);
+  banCache.set(ip, { v, until: Date.now() + 15_000 });
+  return v;
+}
+export function clearBanCache() {
+  banCache.clear();
+}
+
+function send(res, status, json) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(JSON.stringify(json));
+}
+
 export default async function handler(req, res) {
   const url = new URL(req.url, "http://localhost");
+  const ip = clientIp(req);
+  const ua = String(req.headers["user-agent"] ?? "").slice(0, 300);
+  const city = (() => {
+    try {
+      return decodeURIComponent(String(req.headers["x-vercel-ip-city"] ?? ""));
+    } catch {
+      return "";
+    }
+  })();
+  const region = [city, String(req.headers["x-vercel-ip-country"] ?? "")].filter(Boolean).join(", ");
   // after the rewrite Vercel may hand us /api/index?path=..., keep the original path
   const path = url.searchParams.get("__path") ? `/api/${url.searchParams.get("__path")}` : url.pathname;
   const query = Object.fromEntries(url.searchParams);
   const s = getStore();
+
+  if (path.startsWith("/api/admin")) {
+    try {
+      const body = req.method === "POST" ? await readJson(req) : {};
+      const out = await adminRoute({ method: req.method, path, query, body, headers: req.headers, ip, ua, region }, s);
+      if (path.endsWith("/ban") || path.endsWith("/unban")) banCache.clear();
+      return send(res, out.status, out.json);
+    } catch (e) {
+      console.error(e);
+      return send(res, 500, { error: { code: "server", reason: "서버 오류가 났어요" } });
+    }
+  }
+  if (await banned(s, ip)) return send(res, 403, { error: { code: "banned", reason: "이 접속은 운영자가 차단했어요" } });
 
   const m = path.match(/^\/api\/rooms\/([a-z0-9]{6,12})\/stream$/);
   if (m && req.method === "GET") {
@@ -66,9 +108,8 @@ export default async function handler(req, res) {
 
   try {
     const body = req.method === "POST" ? await readJson(req) : {};
-    const out = await route({ method: req.method, path, query, body }, s);
-    res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(JSON.stringify(out.json));
+    const out = await route({ method: req.method, path, query, body, ip, ua, region }, s);
+    send(res, out.status, out.json);
   } catch (e) {
     console.error(e);
     res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });

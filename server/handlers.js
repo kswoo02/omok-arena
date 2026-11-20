@@ -1,5 +1,6 @@
 // HTTP routing shared by the Vercel function (api/index.js) and dev-server.js.
 import { randomBytes } from "node:crypto";
+import { logEvent } from "./admin.js";
 import { abandoned, canSee, cleanName, declineRematch, join, kick, leave, move, newRoom, react, rematch, resign, seatOf, settle, view } from "./game.js";
 
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -9,9 +10,28 @@ const bad = (code, reason, status = 400) => res(status, { error: { code, reason 
 
 export const newRoomId = () => randomBytes(6).toString("base64url").toLowerCase().replace(/[^a-z0-9]/g, "").padEnd(8, "0").slice(0, 8);
 
+/** log the action and any game start/end it caused (admin page) */
+async function record(store, log, playerId, before, after, error) {
+  if (!log?.ctx) return;
+  const nameOf = (r) => r && (r.seats.black?.id === playerId ? r.seats.black.name : r.seats.white?.id === playerId ? r.seats.white.name : null);
+  const name = nameOf(after) ?? nameOf(before) ?? log.name ?? "";
+  const room = before?.id;
+  if (error) {
+    if (log.fail) await logEvent(store, log.ctx, log.fail, { room, name, reason: error.reason });
+    return;
+  }
+  const type = typeof log.type === "function" ? log.type(before) : log.type;
+  if (type) await logEvent(store, log.ctx, type, { room, name, ...(log.extra?.(after) ?? {}) });
+  const names = after ? [after.seats.black?.name, after.seats.white?.name].filter(Boolean).join(" vs ") : "";
+  if (before?.status !== "playing" && after?.status === "playing") await logEvent(store, log.ctx, "game_start", { room, name: names });
+  if (before?.status !== "ended" && after?.status === "ended" && after.result) {
+    await logEvent(store, log.ctx, "game_end", { room, name: names, reason: after.result.reason });
+  }
+}
+
 /** apply fn to the stored room with compare-and-set, retrying on races.
  *  A run-out clock is settled first, so every action sees the timeout. */
-async function mutate(store, id, playerId, fn) {
+async function mutate(store, id, playerId, fn, log = null) {
   for (let i = 0; i < 6; i++) {
     const now = Date.now();
     const stored = await store.get(id);
@@ -22,11 +42,13 @@ async function mutate(store, id, playerId, fn) {
     const out = fn(cur, seen, now);
     let next = out.error ? cur : out.room;
     if (next === stored) {
+      await record(store, log, playerId, stored, stored, out.error);
       if (out.error) return res(out.error.status, { error: { code: out.error.code, reason: out.error.reason } });
       return res(200, { room: view(stored, playerId, { seen, now }), seat: out.seat ?? null });
     }
     next = { ...next, version: stored.version + 1, updatedAt: now };
     if (!(await store.put(next, stored.version))) continue;
+    await record(store, log, playerId, stored, next, out.error);
     if (out.error) return res(out.error.status, { error: { code: out.error.code, reason: out.error.reason } });
     return res(200, { room: view(next, playerId, { seen, now }), seat: out.seat ?? null });
   }
@@ -37,7 +59,8 @@ async function mutate(store, id, playerId, fn) {
  * route({ method, path, query, body }, store) -> { status, json }
  * path is like "/api/rooms/abc123/move"
  */
-export async function route({ method, path, query = {}, body = {} }, store) {
+export async function route({ method, path, query = {}, body = {}, ip, ua, region }, store) {
+  const ctx = ip ? { ip, ua, region } : null; // null in unit tests that call route directly
   const parts = path.replace(/^\/api\/?/, "").split("/").filter(Boolean);
   if (parts[0] !== "rooms") return bad("not_found", "없는 주소예요", 404);
   const playerId = String(body.playerId ?? query.playerId ?? "");
@@ -66,6 +89,8 @@ export async function route({ method, path, query = {}, body = {} }, store) {
         if (await store.put(room, 0)) {
           await store.touch(room.id, playerId, { name: player.name, at: Date.now() });
           await store.markLive(room.id, Date.now());
+          await logEvent(store, ctx, "create", { room: room.id, name: player.name,
+            reason: `${room.rule === "renju" ? "렌주" : "자유"}${room.timeLimit ? `, ${room.timeLimit}초` : ""}${room.pwHash ? ", 비밀방" : ""}` });
           return res(201, { room: view(room, playerId), seat: "black" });
         }
       }
@@ -102,7 +127,9 @@ export async function route({ method, path, query = {}, body = {} }, store) {
       const out = await mutate(store, id, playerId, (r, seen, now) =>
         !seatOf(r, playerId) && abandoned(r, seen, now)
           ? { error: { status: 410, code: "closed", reason: "방장이 오래 자리를 비워 닫힌 방이에요. 로비에서 다른 방을 찾아 주세요." } }
-          : join(r, player, now, { password }));
+          : join(r, player, now, { password }),
+        { ctx, type: (before) => (seatOf(before, playerId) ? "rejoin" : "join"), fail: "join_fail", name: player.name,
+          extra: (r) => ({ reason: seatOf(r, playerId) ? (seatOf(r, playerId) === "black" ? "흑 자리" : "백 자리") : "관전" }) });
       // only people who got in count as present (a wrong password must not appear as a spectator)
       if (out.status === 200) {
         await store.touch(id, playerId, { name: player.name, at: Date.now() });
@@ -112,7 +139,7 @@ export async function route({ method, path, query = {}, body = {} }, store) {
     }
     case "move": {
       const idx = typeof body.idx === "number" ? body.idx : NaN;
-      return mutate(store, id, playerId, (r, _s, now) => move(r, playerId, Number.isInteger(idx) ? idx : -1, now));
+      return mutate(store, id, playerId, (r, _s, now) => move(r, playerId, Number.isInteger(idx) ? idx : -1, now), { ctx });
     }
     case "ping": {
       const name = cleanName(body.nickname) || "손님";
@@ -127,19 +154,19 @@ export async function route({ method, path, query = {}, body = {} }, store) {
       return mutate(store, id, playerId, (r, _s, now) => react(r, player, String(body.emoji ?? ""), now));
     }
     case "decline":
-      return mutate(store, id, playerId, (r) => declineRematch(r, playerId));
+      return mutate(store, id, playerId, (r) => declineRematch(r, playerId), { ctx, type: "rematch_decline" });
     case "kick":
-      return mutate(store, id, playerId, (r, seen, now) => kick(r, playerId, seen, now));
+      return mutate(store, id, playerId, (r, seen, now) => kick(r, playerId, seen, now), { ctx, type: "kick" });
     case "resign":
-      return mutate(store, id, playerId, (r) => resign(r, playerId));
+      return mutate(store, id, playerId, (r) => resign(r, playerId), { ctx, type: "resign" });
     case "leave": {
-      const out = await mutate(store, id, playerId, (r) => leave(r, playerId));
+      const out = await mutate(store, id, playerId, (r) => leave(r, playerId), { ctx, type: "leave" });
       const room = out.status === 200 ? await store.get(id) : null;
       if (room && !room.seats.black && !room.seats.white) await store.remove(id); // last one out closes the room
       return out;
     }
     case "rematch":
-      return mutate(store, id, playerId, (r, _s, now) => rematch(r, playerId, now));
+      return mutate(store, id, playerId, (r, _s, now) => rematch(r, playerId, now), { ctx, type: "rematch" });
     default:
       return bad("not_found", "없는 주소예요", 404);
   }

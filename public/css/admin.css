@@ -1,0 +1,44 @@
+/* admin page: same hall palette, denser tables */
+#admin { max-width: 1280px; margin: 0 auto; padding: 0 var(--gap) 48px; }
+.login-form { display: grid; gap: 8px; }
+.login-form input {
+  min-height: 48px; padding: 0 16px; border: 1.5px solid var(--celadon-deep); border-radius: 12px; background: var(--shell);
+}
+
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; margin: 8px 0 28px;
+  background: var(--celadon-deep); border: 1px solid var(--celadon-deep); border-radius: 14px; overflow: hidden;
+}
+.stats div { background: var(--shell); padding: 12px 14px; }
+.stats dt { font-size: 13px; color: var(--ink-soft); }
+.stats dd { margin: 2px 0 0; font-family: var(--serif); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.block { margin-bottom: 36px; }
+.block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.auto { font-size: 14px; color: var(--ink-soft); display: flex; gap: 6px; align-items: center; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.filters input, .filters select {
+  min-height: 40px; padding: 0 12px; border: 1.5px solid var(--celadon-deep); border-radius: 10px; background: #fff;
+  flex: 1 1 140px; min-width: 0;
+}
+.filters .btn { min-height: 40px; }
+
+.table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--celadon-deep); background: var(--shell); }
+.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+.grid th {
+  text-align: left; font-weight: 700; padding: 8px 10px; background: rgba(143, 168, 152, .25);
+  white-space: nowrap; position: sticky; top: 0;
+}
+.grid td { padding: 7px 10px; border-top: 1px solid rgba(143, 168, 152, .45); vertical-align: top; }
+.grid td.nowrap { white-space: nowrap; }
+.grid tr.warn td { background: rgba(184, 50, 42, .07); }
+.link { border: 0; background: none; padding: 0; color: var(--slate); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font: inherit; }
+.mini {
+  border: 1.5px solid var(--cinnabar); color: var(--cinnabar); background: transparent; border-radius: 999px;
+  padding: 2px 10px; cursor: pointer; font-size: 13px; white-space: nowrap;
+}
+.mini.undo { border-color: var(--slate); color: var(--slate); }
+.tag { display: inline-block; font-size: 12px; padding: 0 8px; border-radius: 999px; background: rgba(29, 32, 36, .08); white-space: nowrap; }
+.tag.bad { background: rgba(184, 50, 42, .14); color: var(--cinnabar); }
+.tag.game { background: rgba(143, 168, 152, .4); }
+.note { font-size: 13px; color: var(--ink-soft); }
