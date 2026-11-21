@@ -64,8 +64,14 @@ check("PC sees the opponent arrive", true);
 // ---- renju first move must be the center
 await hit(A, at(3, 3));
 check("off-center first move is refused", (await status(A)).includes("정중앙"));
+const t0 = Date.now();
 await hit(A, at(7, 7));
+await waitStones(A, 1);
+const own = Date.now() - t0;
 await waitStones(B, 1);
+const other = Date.now() - t0;
+console.log(`      latency: own stone ${own} ms, opponent sees it ${other} ms`);
+check(`own stone shows at once (${own} ms)`, own < 400);
 check("PC move appears on phone", (await stoneCount(B)) === 1);
 
 // ---- phone: tap selects, confirm button places

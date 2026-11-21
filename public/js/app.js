@@ -235,6 +235,7 @@ function game(id, initial = null) {
   let alive = true;
   let stamped = null;
   let clockOffset = 0; // server time - local time
+  let pendingVersion = null; // version my unconfirmed move was made on
   let reactSeq = null;
   const EMOJIS = ["👍", "😮", "😂", "😭", "🔥", "👏"];
 
@@ -258,6 +259,7 @@ function game(id, initial = null) {
 
   function apply(next) {
     if (!next || (room && next.version < room.version)) return;
+    if (pendingVersion !== null && next.version <= pendingVersion) return; // older than my pending move
     const moved = room && next.moveCount !== room.moveCount;
     const declined = room && room.rematch.mine && next.rematch.declined > room.rematch.declined;
     clockOffset = next.serverNow - Date.now();
@@ -469,16 +471,27 @@ function game(id, initial = null) {
     place(idx);
   }
 
+  /** show my stone right away; the server's answer confirms it, or it is taken back */
   async function place(idx) {
     busy = true;
+    const before = room;
+    const color = myColor();
+    const board = room.board.slice();
+    board[idx] = color;
+    pendingVersion = room.version;
+    room = { ...room, board, lastMove: idx, moveCount: room.moveCount + 1, turn: color === 1 ? 2 : 1,
+      forbidden: [], centerOnly: false, deadline: null, optimistic: true };
+    selected = -1;
     render();
     try {
       const { room: next } = await api.move(id, idx);
-      selected = -1;
       busy = false;
+      pendingVersion = null;
       apply(next);
     } catch (e) {
       busy = false;
+      pendingVersion = null;
+      if (room.optimistic) room = before; // nothing newer arrived: take the stone back
       render();
       warn(e.message);
     }
