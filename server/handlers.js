@@ -179,56 +179,90 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Server-sent events for one room: `room` whenever the version changes, `presence` when the
- * set of people online changes (checked every ~5 s), `gone` if the room disappears.
- * Also settles a run-out clock. Ends after `duration` ms; EventSource reconnects by itself.
+ * set of people online changes, `gone` if the room disappears. Also settles a run-out clock.
+ * Changes are pushed by store.watch (Redis pub/sub) so they arrive at once; without it the
+ * stream falls back to polling every `interval` ms. Ends after `duration` ms; EventSource reconnects.
  */
-export async function stream({ id, playerId, since = -1 }, store, write, isClosed, { interval = 1000, duration = 25000 } = {}) {
+export async function stream({ id, playerId, since = -1 }, store, write, isClosed,
+  { interval = 1000, duration = 25000, idle = 5000 } = {}) {
   write("retry: 1000\n\n");
   const end = Date.now() + duration;
   let last = Number.isFinite(since) ? since : -1;
-  let ping = Date.now();
   let deadline = null;
   let presenceKey = "";
+  let lastPresence = 0;
+  let ping = Date.now();
   const first = await store.get(id);
   if (first && !canSee(first, playerId)) {
     write(`event: locked\ndata: {}\n\n`);
     return;
   }
-  for (let tick = 0; !isClosed() && Date.now() < end; tick++) {
-    const now = Date.now();
-    if (deadline && now > deadline + 300) {
-      deadline = null;
-      await mutate(store, id, playerId, (r) => ({ room: r })); // writes the timeout if still due
+
+  let dirty = true;
+  let wake = null;
+  let stop = null;
+  if (store.watch) {
+    try {
+      stop = await store.watch(id, () => {
+        dirty = true;
+        wake?.();
+      });
+    } catch (e) {
+      console.warn("[omok] watch failed, polling instead", e?.message ?? e);
     }
-    const v = await store.version(id);
-    if (v === 0) {
-      write(`event: gone\ndata: {}\n\n`);
-      return;
+  }
+  const pause = (ms) =>
+    new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(t);
+        wake = null;
+        resolve();
+      };
+      const t = setTimeout(done, Math.max(0, ms));
+      wake = done;
+      if (dirty && stop) done();
+    });
+
+  try {
+    while (!isClosed() && Date.now() < end) {
+      const now = Date.now();
+      if (deadline && now > deadline + 300) {
+        deadline = null;
+        await mutate(store, id, playerId, (r) => ({ room: r })); // writes the timeout if still due
+      }
+      const presenceDue = now - lastPresence >= idle;
+      let changed = dirty;
+      if (!stop) changed = (await store.version(id)) !== last; // polling fallback
+      dirty = false;
+      if (changed || presenceDue) {
+        const [room, seen] = await Promise.all([store.get(id), store.seen(id)]);
+        if (!room) {
+          write(`event: gone\ndata: {}\n\n`);
+          return;
+        }
+        lastPresence = Date.now();
+        const vw = view(room, playerId, { seen, now: Date.now() });
+        deadline = vw.status === "playing" ? vw.deadline : null;
+        if (room.version !== last) {
+          last = room.version;
+          write(`event: room\ndata: ${JSON.stringify(vw)}\n\n`);
+        }
+        const p = { spectators: vw.spectators, online: { black: vw.seats.black?.online ?? null, white: vw.seats.white?.online ?? null } };
+        const key = JSON.stringify(p);
+        if (key !== presenceKey) {
+          presenceKey = key;
+          write(`event: presence\ndata: ${key}\n\n`);
+        }
+        ping = Date.now();
+      } else if (Date.now() - ping > 10000) {
+        write(`: ping\n\n`);
+        ping = Date.now();
+      }
+      const untilDeadline = deadline ? deadline + 350 - Date.now() : Infinity;
+      const wait = stop ? Math.min(idle - (Date.now() - lastPresence), untilDeadline, end - Date.now()) : interval;
+      await pause(Math.max(50, wait));
     }
-    const sendPresence = tick % 5 === 0;
-    if (v !== last || sendPresence) {
-      const [room, seen] = await Promise.all([store.get(id), store.seen(id)]);
-      if (!room) {
-        await sleep(interval);
-        continue;
-      }
-      const vw = view(room, playerId, { seen, now: Date.now() });
-      deadline = vw.status === "playing" ? vw.deadline : null;
-      if (room.version !== last) {
-        last = room.version;
-        write(`event: room\ndata: ${JSON.stringify(vw)}\n\n`);
-      }
-      const p = { spectators: vw.spectators, online: { black: vw.seats.black?.online ?? null, white: vw.seats.white?.online ?? null } };
-      const key = JSON.stringify(p);
-      if (key !== presenceKey) {
-        presenceKey = key;
-        write(`event: presence\ndata: ${key}\n\n`);
-      }
-      ping = Date.now();
-    } else if (Date.now() - ping > 10000) {
-      write(`: ping\n\n`);
-      ping = Date.now();
-    }
-    await sleep(interval);
+  } finally {
+    await stop?.();
   }
 }

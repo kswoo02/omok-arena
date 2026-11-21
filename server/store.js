@@ -12,6 +12,8 @@ export function memoryStore() {
   const rooms = new Map(); // id -> { json, expires }
   const presence = new Map(); // id -> { playerId: { name, at } }
   const live = new Map(); // id -> last time a seated player was seen
+  const watchers = new Map(); // id -> Set<fn>
+  const notify = (id) => (watchers.get(id) ?? new Set()).forEach((fn) => fn());
   let logs = [];
   const banned = new Map();
   const fails = new Map(); // ip -> { n, until }
@@ -34,7 +36,14 @@ export function memoryStore() {
       const v = cur ? JSON.parse(cur.json).version : 0;
       if (v !== expected) return false;
       rooms.set(room.id, { json: JSON.stringify(room), expires: Date.now() + TTL_SEC * 1000 });
+      notify(room.id);
       return true;
+    },
+    /** call fn whenever the room changes or is removed; returns an async stop() */
+    async watch(id, fn) {
+      if (!watchers.has(id)) watchers.set(id, new Set());
+      watchers.get(id).add(fn);
+      return async () => watchers.get(id)?.delete(fn);
     },
     async list() {
       return [...rooms.keys()]
@@ -60,6 +69,7 @@ export function memoryStore() {
       rooms.delete(id);
       presence.delete(id);
       live.delete(id);
+      notify(id);
     },
     async allRooms() {
       return [...rooms.keys()].map((id) => alive(id)).filter(Boolean)
@@ -105,6 +115,7 @@ if (cur or '0') ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[4])
 redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[4])
 redis.call('ZADD', KEYS[3], ARGV[5], ARGV[6])
+redis.call('PUBLISH', 'omok:ch:' .. ARGV[6], ARGV[3])
 return 1`;
 
 /** redis: an @upstash/redis client */
@@ -151,6 +162,18 @@ export function redisStore(redis) {
       await redis.del(rk(id), vk(id), pk(id));
       await redis.zrem(LIST, id);
       await redis.zrem(LIVE, id);
+      await redis.publish(`omok:ch:${id}`, "gone");
+    },
+    /** pub/sub push: fn() on every change of this room. Returns an async stop(). */
+    async watch(id, fn) {
+      const sub = redis.subscribe([`omok:ch:${id}`]);
+      sub.on("message", () => fn());
+      sub.on("error", (e) => console.warn("[omok] subscribe error", e?.message ?? e));
+      return async () => {
+        try {
+          await sub.unsubscribe();
+        } catch {}
+      };
     },
     async allRooms() {
       const ids = await redis.zrange(LIST, 0, 199, { rev: true });

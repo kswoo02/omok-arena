@@ -183,3 +183,17 @@ test("store lists only rooms with a seated player online recently", async () => 
   assert.equal(await s.get("live1"), null);
   assert.deepEqual(await s.list(), []);
 });
+
+test("memory store notifies watchers on every write and on removal", async () => {
+  const s = memoryStore();
+  const room = { ...newRoom({ id: "w1", name: "", rule: "free", player: A }), version: 1 };
+  let hits = 0;
+  const stop = await s.watch("w1", () => hits++);
+  await s.put(room, 0);
+  await s.put({ ...room, version: 2 }, 1);
+  await s.remove("w1");
+  assert.equal(hits, 3);
+  await stop();
+  await s.put({ ...room, version: 1 }, 0);
+  assert.equal(hits, 3);
+});

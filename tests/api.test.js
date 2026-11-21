@@ -258,3 +258,17 @@ test("admin: login, logs with ip and device, ban blocks the player api", async (
   assert.equal((await post("/api/rooms", { playerId: "player_iplogged1", nickname: "기록됨", rule: "free" })).status, 201);
   setAdminConfig(null);
 });
+
+test("the opponent's stream gets a move within 400 ms (pushed, not polled)", async () => {
+  const id = (await call("POST", "/api/rooms", { playerId: PA, nickname: "A", rule: "free" })).json.room.id;
+  await call("POST", `/api/rooms/${id}/join`, { playerId: PB, nickname: "B" });
+  const first = waitAny(id, PB, (ev) => ev === "room"); // connection is up once the first room event lands
+  await first;
+  await new Promise((r) => setTimeout(r, 300)); // land between two old 1 s polls
+  const seen = waitAny(id, PB, (ev, d) => ev === "room" && d.moveCount === 1);
+  const t0 = Date.now();
+  await call("POST", `/api/rooms/${id}/move`, { playerId: PA, idx: 3 });
+  await seen;
+  const ms = Date.now() - t0;
+  assert.ok(ms < 400, `took ${ms} ms`);
+});
