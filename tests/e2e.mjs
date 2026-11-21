@@ -177,6 +177,7 @@ for (let i = 0; i < 5; i++) {
 }
 await B.waitForSelector(".stamp.show");
 check("five wins in free rule (phone sees 흑승)", (await B.locator(".stamp").innerText()) === "흑승");
+await A.waitForSelector(".plate-bottom .plate-seal", { timeout: 8000 }).catch(() => {});
 check("winner plate shows 승", (await A.locator(".plate-bottom .plate-seal").count()) === 1);
 if (OUT) {
   await A.screenshot({ path: `${OUT}/pc-win.png` });
@@ -184,6 +185,7 @@ if (OUT) {
 }
 
 // ---- owner kicks the opponent after the game; the kicked player can only watch
+await A.waitForSelector(".plate-top .plate-kick", { timeout: 8000 });
 await A.locator(".plate-top .plate-kick").click();
 await A.getByRole("button", { name: "내보내기", exact: true }).last().click();
 await B.waitForFunction(() => document.querySelector(".status")?.innerText.includes("관전") || document.querySelector(".plate-bottom")?.innerText.includes("앨리스"), null, { timeout: 10000 });
