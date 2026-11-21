@@ -34,11 +34,12 @@ async function record(store, log, playerId, before, after, error) {
 async function mutate(store, id, playerId, fn, log = null) {
   for (let i = 0; i < 6; i++) {
     const now = Date.now();
-    const stored = await store.get(id);
+    // room and presence in parallel: one round trip to Redis instead of two
+    const [stored, seen] = await Promise.all([store.get(id), store.seen(id)]);
     if (!stored) return bad("not_found", "방이 없어요. 시간이 지나 사라졌을 수 있어요.", 404);
+    if (!log?.join && !canSee(stored, playerId)) return locked(stored); // secret room, not let in
     const settled = settle(stored, now);
     const cur = settled ?? stored;
-    const seen = await store.seen(id);
     const out = fn(cur, seen, now);
     let next = out.error ? cur : out.room;
     if (next === stored) {
@@ -113,22 +114,17 @@ export async function route({ method, path, query = {}, body = {}, ip, ua, regio
   if (method !== "POST") return bad("method", "지원하지 않는 요청이에요", 405);
   const e = needPlayer();
   if (e) return e;
-  if (action !== "join") {
-    const room = await store.get(id);
-    if (room && !canSee(room, playerId)) return locked(room);
-  }
 
   switch (action) {
     case "join": {
       const player = needName();
       if (!player) return bad("nickname", "닉네임을 입력해 주세요");
-      if (!(await store.get(id))) return bad("not_found", "방이 없어요. 시간이 지나 사라졌을 수 있어요.", 404);
       const password = typeof body.password === "string" ? body.password : undefined;
       const out = await mutate(store, id, playerId, (r, seen, now) =>
         !seatOf(r, playerId) && abandoned(r, seen, now)
           ? { error: { status: 410, code: "closed", reason: "방장이 오래 자리를 비워 닫힌 방이에요. 로비에서 다른 방을 찾아 주세요." } }
           : join(r, player, now, { password }),
-        { ctx, type: (before) => (seatOf(before, playerId) ? "rejoin" : "join"), fail: "join_fail", name: player.name,
+        { ctx, join: true, type: (before) => (seatOf(before, playerId) ? "rejoin" : "join"), fail: "join_fail", name: player.name,
           extra: (r) => ({ reason: seatOf(r, playerId) ? (seatOf(r, playerId) === "black" ? "흑 자리" : "백 자리") : "관전" }) });
       // only people who got in count as present (a wrong password must not appear as a spectator)
       if (out.status === 200) {
@@ -145,6 +141,7 @@ export async function route({ method, path, query = {}, body = {}, ip, ua, regio
       const name = cleanName(body.nickname) || "손님";
       const room = await store.get(id);
       if (!room) return bad("not_found", "방이 없어요", 404);
+      if (!canSee(room, playerId)) return locked(room);
       await store.touch(id, playerId, { name, at: Date.now() });
       if (seatOf(room, playerId)) await store.markLive(id, Date.now());
       return res(200, { ok: true });
@@ -210,12 +207,11 @@ export async function stream({ id, playerId, since = -1 }, store, write, isClose
     }
     const sendPresence = tick % 5 === 0;
     if (v !== last || sendPresence) {
-      const room = await store.get(id);
+      const [room, seen] = await Promise.all([store.get(id), store.seen(id)]);
       if (!room) {
         await sleep(interval);
         continue;
       }
-      const seen = await store.seen(id);
       const vw = view(room, playerId, { seen, now: Date.now() });
       deadline = vw.status === "playing" ? vw.deadline : null;
       if (room.version !== last) {
