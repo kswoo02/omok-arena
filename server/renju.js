@@ -5,7 +5,6 @@ export const BLACK = 1;
 export const WHITE = 2;
 
 const DIRS = [[1, 0], [0, 1], [1, 1], [1, -1]];
-const MAX_DEPTH = 6; // recursion depth for false-three checks
 
 export const REASONS = {
   occupied: "이미 돌이 있는 자리",
@@ -67,24 +66,24 @@ function isOpenFour(b, idx, dx, dy) {
   return pts.length === 2 && pts[1] - pts[0] === 5;
 }
 
-/** a direction holds a real open three if one more stone makes an open four there,
- *  and that stone is not itself forbidden for black */
-function hasOpenThree(b, idx, dx, dy, depth) {
+/** a direction holds an open three if one more stone there makes an open four.
+ *  Strict rule (user decision): no "false three" exception — it counts even when that
+ *  stone would itself be forbidden for black. */
+function hasOpenThree(b, idx, dx, dy) {
   for (let k = -4; k <= 4; k++) {
     if (k === 0) continue;
     const p = step(idx, dx, dy, k);
     if (p < 0 || b[p] !== 0) continue;
     b[p] = BLACK;
     const open = isOpenFour(b, idx, dx, dy) && run(b, idx, BLACK, dx, dy).includes(p);
-    const ok = open && forbiddenAt(b, p, depth + 1) === null;
     b[p] = 0;
-    if (ok) return true;
+    if (open) return true;
   }
   return false;
 }
 
 /** black stone already placed at idx: forbidden code or null. Exact five is never forbidden. */
-function forbiddenAt(b, idx, depth = 0) {
+function forbiddenAt(b, idx) {
   let overline = false;
   for (const [dx, dy] of DIRS) {
     const n = run(b, idx, BLACK, dx, dy).length;
@@ -100,10 +99,9 @@ function forbiddenAt(b, idx, depth = 0) {
     fourDirs.push(f > 0);
   }
   if (fours >= 2) return "44";
-  if (depth >= MAX_DEPTH) return null;
   let threes = 0;
   DIRS.forEach(([dx, dy], i) => {
-    if (!fourDirs[i] && hasOpenThree(b, idx, dx, dy, depth)) threes++;
+    if (!fourDirs[i] && hasOpenThree(b, idx, dx, dy)) threes++;
   });
   return threes >= 2 ? "33" : null;
 }

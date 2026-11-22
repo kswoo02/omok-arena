@@ -104,13 +104,14 @@ const falseThree = {
   white: [[3, 7]],
 };
 
-test("false three (open-four point is forbidden) is not 3-3", () => {
+test("strict: a three whose open-four point is itself forbidden still counts (3-3)", () => {
   const b = board(falseThree);
   b[at(7, 7)] = B;
   assert.equal(judge(b, at(8, 7), B, "renju", 20).code, "44"); // the trap point
   b[at(7, 7)] = 0;
   const r = judge(b, at(7, 7), B, "renju", 20);
-  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(r.code, "33");
 });
 
 test("same shape without the trap is a real 3-3", () => {
@@ -156,7 +157,26 @@ test("forbiddenPoints lists 3-3 and 4-4 points with reasons", () => {
   assert.ok(p);
   assert.equal(p.code, "33");
   assert.equal(p.reason, "흑 3·3 금수");
-  const none = forbiddenPoints(board(falseThree));
-  assert.equal(none.some((q) => q.idx === at(7, 7)), false);
-  assert.equal(none.some((q) => q.idx === at(8, 7)), false); // (8,7) is only 4-4 once (7,7) is black
+  const strict = forbiddenPoints(board(falseThree));
+  assert.equal(strict.find((q) => q.idx === at(7, 7))?.code, "33"); // looks like 3-3 -> forbidden
+  assert.equal(strict.some((q) => q.idx === at(8, 7)), false); // (8,7) is only 4-4 once (7,7) is black
+});
+
+test("split three (X.XX) counts toward 3-3", () => {
+  // row: (5,7) . (7,7)* (8,7) -> X.XX ; column: (7,5),(7,6)
+  const r = judge(board({ black: [[5, 7], [8, 7], [7, 5], [7, 6]] }), at(7, 7), B, "renju", 10);
+  assert.equal(r.code, "33");
+});
+
+test("diagonal + anti-diagonal 3-3", () => {
+  const r = judge(board({ black: [[5, 5], [6, 6], [9, 5], [8, 6]] }), at(7, 7), B, "renju", 10);
+  assert.equal(r.code, "33");
+});
+
+test("closed four + closed four is still 4-4", () => {
+  const r = judge(
+    board({ black: [...row(7, [4, 5, 6]), ...col(7, [4, 5, 6])], white: [[3, 7], [7, 3]] }),
+    at(7, 7), B, "renju", 10,
+  );
+  assert.equal(r.code, "44");
 });
